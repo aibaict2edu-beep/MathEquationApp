@@ -150,7 +150,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v29</span>
+    <span style="font-size:12px;opacity:.85">試作版 v30</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -364,6 +364,10 @@
         <h2 class="subh">入力</h2>
         <label><input type="checkbox" id="penOnly" checked> ペンのみ(指を無視)</label>
         <div class="msg">オンにすると、手書き欄では指の入力を無視します。グラフのペン・文字・消しゴムのときは、指のドラッグがグラフの移動になります。</div>
+        <h2 class="subh">作業の保存・読み込み</h2>
+        <div class="row"><button id="btnWorkSave">ファイルに書き出す</button><button id="btnWorkLoad">ファイルを読み込む</button></div>
+        <input type="file" id="workFile" accept=".json,application/json" hidden>
+        <div class="msg" id="workMsg">式・表示範囲・グラフへの書き込み・表示の設定を、1つのファイル(.json)に保存します。手書き欄の筆跡と、APIキーは保存されません。</div>
       </div>
     </section>
   </div>
@@ -2910,6 +2914,75 @@ $("coefStep").addEventListener("change", () => { coefBuildRows(); });
 ["coefGhost", "coefMarks"].forEach(id => $(id).addEventListener("change", drawGraph));
 $("coefReset").onclick = () => { coefVals = coefDefaults(coefKind); coefGhostVals = null; coefLast = -1; coefBuildRows(); coefApply(); };
 $("btnGraph").onclick = () => { drawFromInput(); if (coefOn() && !coefBusy) coefSyncFromFormula(); };
+
+/* ============ 作業の保存・読み込み(ファイル) ============ */
+const WORK_SKIP = new Set(["apiKey", "modelName", "penOnly", "workFile"]);
+function workCollect() {
+  const controls = {};
+  document.querySelectorAll("#app input[id], #app select[id]").forEach(el => {
+    if (WORK_SKIP.has(el.id) || el.type === "file" || el.type === "range" || el.closest("#coefRows")) return;
+    controls[el.id] = el.type === "checkbox" ? el.checked : el.value;
+  });
+  const ivm = document.querySelector("input[name=ivm]:checked");
+  return {
+    app: "handwritten-math-graph", version: 1, saved: new Date().toISOString(),
+    controls, ivm: ivm ? ivm.value : "A", fcol: { ...fcol }, annots, annColor,
+    coef: { vals: coefVals.slice(), kind: coefKind }
+  };
+}
+function workApply(d) {
+  if (!d || d.app !== "handwritten-math-graph" || !d.controls) throw new Error("このアプリのファイルではありません");
+  Object.entries(d.controls).forEach(([id, v]) => {
+    const el = document.getElementById(id); if (!el || WORK_SKIP.has(id) || el.type === "file") return;
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.tagName === "SELECT") { if ([...el.options].some(o => o.value === String(v))) el.value = String(v); }
+    else el.value = v;
+  });
+  [1, 2].forEach(n => {
+    if (d.fcol && d.fcol[n]) fcol[n] = d.fcol[n];
+    document.querySelectorAll('.sw[data-f="' + n + '"] .swb').forEach(b => b.classList.toggle("on", b.dataset.c === fcol[n]));
+  });
+  annots = Array.isArray(d.annots) ? d.annots : []; annHistory = [];
+  if (d.annColor) { annColor = d.annColor; document.querySelectorAll("#annOpts .col").forEach(b => b.classList.toggle("on", b.dataset.c === annColor)); }
+  annW = +$("annW").value || annW; annSize = +$("annSize").value || annSize;
+  if (d.ivm) { const r = document.querySelector("input[name=ivm][value=" + d.ivm + "]"); if (r) r.checked = true; }
+  zoomStack.length = 0; updateZoomBack();
+  updateModeUI(); $("coefPanel").hidden = !coefOn();
+  if (d.coef && coefOn()) { coefKind = d.coef.kind || coefKind; coefVals = (d.coef.vals || coefVals).slice(); }
+  diffPt = null; updateDiffUI();
+  drawFromInput();
+  if (coefOn()) { coefBuildRows(); coefRowsSync(); coefApply(); }
+  ["selL", "selR"].forEach(id => { const v = d.controls[id]; if (v !== undefined && [...$(id).options].some(o => o.value === String(v))) $(id).value = String(v); });
+  refreshAll();
+}
+async function workSave() {
+  const d = new Date(), z = n => String(n).padStart(2, "0");
+  const fname = "graph_work_" + d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + "_" + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds()) + ".json";
+  const blob = new Blob([JSON.stringify(workCollect(), null, 1)], { type: "application/json" });
+  const file = new File([blob], fname, { type: "application/json" });
+  const msg = t => { $("workMsg").textContent = t; };
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: "グラフの作業" }); msg("書き出しました: " + fname); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  msg("書き出しました: " + fname);
+}
+$("btnWorkSave").onclick = workSave;
+$("btnWorkLoad").onclick = () => { $("workFile").value = ""; $("workFile").click(); };
+$("workFile").addEventListener("change", () => {
+  const f = $("workFile").files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try { workApply(JSON.parse(String(rd.result))); $("workMsg").textContent = "読み込みました: " + f.name; }
+    catch (e) { $("workMsg").textContent = "読み込めませんでした: " + e.message; }
+  };
+  rd.onerror = () => { $("workMsg").textContent = "ファイルを読めませんでした"; };
+  rd.readAsText(f);
+});
 
 /* ============ 画面の拡大(虫眼鏡) ============ */
 function applyWide() { document.body.classList.toggle("wide", window.innerWidth / ZF >= 900); }

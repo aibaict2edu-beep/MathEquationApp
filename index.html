@@ -294,7 +294,7 @@
           <div class="msg">キーはソースに書かれません。公開リポジトリにキーを入れないでください。</div>
         </div>
         <h2 class="subh">入力</h2>
-        <label><input type="checkbox" id="penOnly"> ペンのみ(指を無視)</label>
+        <label><input type="checkbox" id="penOnly" checked> ペンのみ(指を無視)</label>
         <div class="msg">オンにすると、手書き欄では指の入力を無視します。グラフのペン・文字・消しゴムのときは、指のドラッグがグラフの移動になります。</div>
       </div>
     </section>
@@ -1462,7 +1462,7 @@ const HINTS = {
   erase: "消したい書き込みをなぞると消えます",
   zoom: "拡大したい範囲をドラッグで囲むと、その範囲を画面いっぱいに表示します"
 };
-function panAllowed(e) { return gmode !== "zoom" && gmode === "move" || gmode === "diff" || ($("penOnly").checked && e.pointerType === "touch"); }
+function panAllowed(e) { if (gmode === "zoom") return false; return gmode === "move" || gmode === "diff" || ($("penOnly").checked && e.pointerType === "touch"); }
 function setGmode(m) {
   gmode = m;
   [["move", "gmMove"], ["diff", "gmDiff"], ["pen", "gmPen"], ["text", "gmText"], ["erase", "gmErase"], ["zoom", "gmZoom"]].forEach(([k, id]) => $(id).classList.toggle("on", k === m));

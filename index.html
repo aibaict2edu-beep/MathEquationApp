@@ -53,7 +53,7 @@
   #diffPanel button { min-height:32px; padding:4px 10px; font-size:13px; }
   #diffPanel label { font-size:12px; }
   #diffArrow { width:54px; height:54px; border:2px solid var(--line); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:30px; font-weight:700; color:#999; flex:none; background:#fff; }
-  .diffInfo { min-height:24px; font-size:1em; overflow-x:auto; }
+  .diffInfo { min-height:24px; font-size:calc(1em * var(--tf, 1)); overflow-x:auto; }
 
   /* ===== v8 画面構成: グラフを常に見える場所に固定し、操作はタブにまとめる ===== */
   main#app { max-width:none; margin:0; padding:10px; display:grid; gap:12px; grid-template-columns:1fr; }
@@ -150,13 +150,18 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v25</span>
+    <span style="font-size:12px;opacity:.85">試作版 v26</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
       <button type="button" data-z="1.25">125%</button>
       <button type="button" data-z="1.5">150%</button>
       <button type="button" data-z="2">200%</button>
+      <div style="font-size:12px;color:var(--sub);text-align:center;border-top:1px solid var(--line);padding-top:6px">座標の数字</div>
+      <button type="button" data-t="1">標準</button>
+      <button type="button" data-t="1.4">大</button>
+      <button type="button" data-t="1.8">特大</button>
+      <button type="button" data-t="2.4">最大</button>
     </div>
   </div>
 </header>
@@ -1304,7 +1309,8 @@ function drawShade(X, Y, W, H) {
 }
 const fcol = { 1: "#d62d2d", 2: "#2457d6" };
 let ZF = 1; // 画面の拡大倍率(虫眼鏡)
-function tickFs() { return (+$("tickSize").value || 22) * ZF; }
+let TF = 1; // 座標の数値の拡大(虫眼鏡)
+function tickFs() { return (+$("tickSize").value || 22) * ZF * TF; }
 
 /* ============ キャンバス用: 分数(縦書き)と√(線つき)を含む文字列の描画 ============ */
 function mlParse(s, allowFrac) {
@@ -2364,12 +2370,20 @@ function setZoom(z, save) {
   root.style.setProperty("--zf", ZF); document.documentElement.style.setProperty("--zf", ZF);
   root.classList.toggle("zoomed", ZF !== 1);
   applyWide();
-  document.querySelectorAll("#lensMenu button").forEach(b => b.classList.toggle("on", +b.dataset.z === ZF));
+  document.querySelectorAll("#lensMenu button[data-z]").forEach(b => b.classList.toggle("on", +b.dataset.z === ZF));
   if (save) { try { localStorage.setItem("mh_zoom", String(ZF)); } catch (e) {} }
   if (ZF !== old) { setupGraph(); setupPad(); }
 }
 $("btnLens").addEventListener("click", e => { e.stopPropagation(); $("lensMenu").hidden = !$("lensMenu").hidden; });
-document.querySelectorAll("#lensMenu button").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); setZoom(+b.dataset.z, true); $("lensMenu").hidden = true; }));
+document.querySelectorAll("#lensMenu button[data-z]").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); setZoom(+b.dataset.z, true); $("lensMenu").hidden = true; }));
+function setTF(t, save) {
+  TF = [1, 1.4, 1.8, 2.4].includes(t) ? t : 1;
+  document.documentElement.style.setProperty("--tf", TF);
+  document.querySelectorAll("#lensMenu button[data-t]").forEach(b => b.classList.toggle("on", +b.dataset.t === TF));
+  if (save) { try { localStorage.setItem("mh_tf", String(TF)); } catch (e) {} }
+  if (typeof drawGraph === "function") drawGraph();
+}
+document.querySelectorAll("#lensMenu button[data-t]").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); setTF(+b.dataset.t, true); $("lensMenu").hidden = true; }));
 document.addEventListener("click", e => { if (!e.target.closest || !e.target.closest("#lensWrap")) $("lensMenu").hidden = true; });
 window.addEventListener("resize", () => { applyWide(); setupGraph(); setupPad(); });
 
@@ -2451,7 +2465,7 @@ if (window.ResizeObserver) new ResizeObserver(() => setupGraph()).observe($("gwr
 
 /* ============ 初期化 ============ */
 loadKey(); setupPad(); setupGraph(); syncInputs(); updateModeUI(); updateIvUI(); setGmode("move"); setTab("draw");
-{ let z = 1; try { z = +localStorage.getItem("mh_zoom") || 1; } catch (e) {} setZoom(z, false); }
+{ let z = 1; try { z = +localStorage.getItem("mh_zoom") || 1; } catch (e) {} setZoom(z, false); let t = 1; try { t = +localStorage.getItem("mh_tf") || 1; } catch (e) {} setTF(t, false); }
 </script>
 </body>
 </html>

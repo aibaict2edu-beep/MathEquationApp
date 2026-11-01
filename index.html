@@ -150,7 +150,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v27</span>
+    <span style="font-size:12px;opacity:.85">試作版 v28</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -1403,6 +1403,10 @@ function drawGraph() {
   drawCoefGhost(X, Y, W, H);
   if (fn) drawCurve(fn, fcol[1], X, Y, W, H, isTan(info1));
   if (fn2 && useG()) drawCurve(fn2, fcol[2], X, Y, W, H, isTan(info2));
+  if (conicWhole()) {
+    const pg = conicPolygon(cn[0].c, 240);
+    if (pg) { gctx.beginPath(); pg.forEach((p, i) => { if (i) gctx.lineTo(X(p[0]), Y(p[1])); else gctx.moveTo(X(p[0]), Y(p[1])); }); gctx.closePath(); gctx.fillStyle = "rgba(46,160,90,0.42)"; gctx.fill(); }
+  }
   cn.forEach((q, i) => { if (q) drawConic(q, fcol[i + 1], X, Y, W, H); });
   drawCoefMarks(X, Y, W, H);
   drawDots(X, Y, W, H);
@@ -1605,6 +1609,74 @@ function conicDeriv(c, x, y) { // 点 (x,y) での接線と dy/dx
   out.lineTex = lineTex;
   return out;
 }
+
+/* --- 円・楕円の面積 --- */
+function isSqInt(n) { const r = Math.round(Math.sqrt(n)); return r * r === n; }
+function sqrtQ(q) { // √q を TeX で。有理数になれば rat を返す
+  const sn = Math.round(Math.sqrt(q.n)), sd = Math.round(Math.sqrt(q.d));
+  if (sn * sn === q.n && sd * sd === q.d) { const r = Q(sn, sd); return { tex: texQ(r), rat: r, val: sn / sd }; }
+  if (q.d === 1) return { tex: "\\sqrt{" + q.n + "}", rat: null, val: Math.sqrt(q.n) };
+  return { tex: "\\sqrt{\\frac{" + q.n + "}{" + q.d + "}}", rat: null, val: Math.sqrt(q.n / q.d) };
+}
+function conicAreaInfo(c) { // 楕円(円)全体の面積。値は val = π·k
+  const o = conicCenter(c); if (!o) return null;
+  const Fc = conicVal(c, o.x, o.y), d = c.A * c.C - c.B * c.B / 4;
+  if (!(d > 0) || !(Fc < 0)) return null;
+  const k = -Fc / Math.sqrt(d); // 面積 = π k
+  const info = { k, val: Math.PI * k, center: o, axis: Math.abs(c.B) < 1e-12 };
+  if (info.axis && c.ex) {
+    const qa = qFromFloat(o.x, 1000, 1e-9), qb = qFromFloat(o.y, 1000, 1e-9);
+    if (qa && qb) {
+      const Fq = qSub(Q(c.F, 1), qAdd(qDiv(Q(c.D * c.D, 1), Q(4 * c.A, 1)), qDiv(Q(c.E * c.E, 1), Q(4 * c.C, 1))));
+      const a2 = qDiv(qSub(qZero(), Fq), Q(c.A, 1)), b2 = qDiv(qSub(qZero(), Fq), Q(c.C, 1));
+      info.q = { px: qa, py: qb, a2, b2 };
+    }
+  }
+  return info;
+}
+function conicAreaTexVal(c, ai) { // 「π·√..」の形の TeX
+  if (ai.q) {
+    const s = sqrtQ(qMul(ai.q.a2, ai.q.b2));
+    if (s.rat && s.rat.d !== 1) return "\\frac{" + (s.rat.n === 1 ? "" : s.rat.n) + "\\pi}{" + s.rat.d + "}";
+    const ks = s.rat ? (s.rat.n === 1 ? "" : texQ(s.rat)) : s.tex;
+    return ks + "\\pi";
+  }
+  const v = ai.k, t = numTex(v);
+  return (t === "1" ? "" : t) + "\\pi";
+}
+function conicAreaSteps(c, ai, isCircle) { // 途中式(座標軸に平行な楕円・円)
+  const st = [];
+  const q = ai.q;
+  const a = sqrtQ(q.a2), b = sqrtQ(q.b2), ab = sqrtQ(qMul(q.a2, q.b2));
+  const px = texQ(q.px), py = texQ(q.py);
+  const sh = (v, name) => v.n === 0 ? name : "(" + name + (v.n > 0 ? "-" : "+") + texQ(Q(Math.abs(v.n), v.d)) + ")";
+  const std = "\\frac{" + sh(q.px, "x") + "^{2}}{" + texQ(q.a2) + "}+\\frac{" + sh(q.py, "y") + "^{2}}{" + texQ(q.b2) + "}=1";
+  if (isCircle) {
+    st.push({ cap: "① 円の方程式を標準形 (x−p)²+(y−q)²=r² に直します", tex: sh(q.px, "x") + "^{2}+" + sh(q.py, "y") + "^{2}=" + texQ(q.a2) + ",\\quad r=" + a.tex + "\\ (以下 a=b=r として計算します)" });
+  } else {
+    st.push({ cap: "① 標準形 (x−p)²/a²+(y−q)²/b²=1 に直します", tex: std + ",\\quad a^{2}=" + texQ(q.a2) + ",\\ b^{2}=" + texQ(q.b2) });
+    st.push({ cap: "　 a は x 方向、b は y 方向の半径です", tex: "a=" + a.tex + ",\\quad b=" + b.tex });
+  }
+  if (q.px.n !== 0 || q.py.n !== 0) st.push({ cap: "平行移動しても面積は変わらないので、中心を原点に移して考えます", tex: "" });
+  st.push({ cap: "対称なので、第1象限(x≧0, y≧0)の部分の面積を4倍します。そこでは y=(b/a)√(a²−x²) です", tex: "S=4\\int_{0}^{a}\\frac{b}{a}\\sqrt{a^{2}-x^{2}}\\,dx\\quad\\left(y=\\frac{b}{a}\\sqrt{a^{2}-x^{2}}\\right)" });
+  st.push({ cap: "置換積分: x=a sinθ とおくと dx=a cosθ dθ。x が 0→a のとき θ は 0→π/2。√(a²−x²)=a cosθ(0≦θ≦π/2 で cosθ≧0)", tex: "S=4\\int_{0}^{\\pi/2}\\frac{b}{a}\\cdot a\\cos\\theta\\cdot a\\cos\\theta\\,d\\theta=4ab\\int_{0}^{\\pi/2}\\cos^{2}\\theta\\,d\\theta" });
+  st.push({ cap: "半角の公式 cos²θ=(1+cos2θ)/2 を使います", tex: "=4ab\\int_{0}^{\\pi/2}\\frac{1+\\cos2\\theta}{2}\\,d\\theta=2ab\\left[\\theta+\\frac{\\sin2\\theta}{2}\\right]_{0}^{\\pi/2}=2ab\\cdot\\frac{\\pi}{2}=\\pi ab" });
+  const abTex = isCircle ? "r^{2}" : "ab";
+  if (isCircle) st.push({ cap: "円では a=b=r なので、公式 S=πr² になります", tex: "S=\\pi r^{2}=\\pi\\cdot" + texQ(q.a2) + "=" + conicAreaTexVal(c, ai) });
+  else st.push({ cap: "値を代入します", tex: "S=\\pi ab=\\pi\\cdot" + a.tex + "\\cdot" + b.tex + "=" + conicAreaTexVal(c, ai) });
+  return st;
+}
+function conicPolygon(c, n) { // 楕円の内部(画面に塗る用) データ座標の点列
+  const o = conicCenter(c); if (!o) return null;
+  const Fc = conicVal(c, o.x, o.y), pts = [];
+  for (let k = 0; k < n; k++) {
+    const t = 2 * Math.PI * k / n, dx = Math.cos(t), dy = Math.sin(t);
+    const q = c.A * dx * dx + c.B * dx * dy + c.C * dy * dy, r2 = -Fc / q; if (!(r2 > 0)) return null;
+    const r = Math.sqrt(r2); pts.push([o.x + r * dx, o.y + r * dy]);
+  }
+  return pts;
+}
+const conicWhole = () => regionOn() && cn[0] && (cn[0].kind === "ellipse" || cn[0].kind === "circle");
 /*CONIC_END*/
 
 function isImplicitEq(src) { // y=f(x) 以外の「=」を含む式
@@ -1677,7 +1749,7 @@ function drawFromInput() {
   if (useRegion) {
     if (useG()) {
       const src2 = $("latex2").value.trim();
-      if (!src2) { $("graphMsg").textContent = "式2を入力してください(式1だけ表示中)"; $("graphMsg").className = "msg err"; }
+      if (!src2) { if (!(cn[0] && (cn[0].kind === "ellipse" || cn[0].kind === "circle"))) { $("graphMsg").textContent = "式2を入力してください(式1だけ表示中)"; $("graphMsg").className = "msg err"; } }
       else if (isImplicitEq(src2)) {
         try { cn[1] = conicCompile(src2); infoLines.push("式2: " + cn[1].name); }
         catch (e) { $("graphMsg").textContent = "式2がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; }
@@ -1687,7 +1759,8 @@ function drawFromInput() {
         catch (e) { $("graphMsg").textContent = "式2がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; }
       }
     } else { fn2 = () => 0; info2 = { rhs: "0" }; }
-    if (cn[0] || cn[1]) { $("graphMsg").textContent = "円・楕円・双曲線の面積(積分)は次の段階で対応します。いまは描画と微分のみです"; $("graphMsg").className = "msg"; }
+    const wholeOnly = cn[0] && (cn[0].kind === "ellipse" || cn[0].kind === "circle") && !cn[1] && (!useG() || !fn2);
+    if ((cn[0] || cn[1]) && !wholeOnly) { $("graphMsg").textContent = "この組み合わせの面積は次の段階で対応します。円・楕円は、式2を空にすると内側全体の面積を出せます"; $("graphMsg").className = "msg"; }
   }
   { const el = cn.find(q => q && (q.kind === "ellipse" || q.kind === "circle"));
     if (el && isInitialView()) {
@@ -1777,8 +1850,22 @@ function computeRegion() {
   region = { ok: true, a, b, interior, area: num.area, exact: ex, fTop: h((a + b) / 2) >= 0, inter };
 }
 function decTex(v) { return String(+v.toPrecision(5)); }
+function renderConicResult() {
+  const box = $("resMath"), wrapBox = $("result"), q = cn[0];
+  wrapBox.classList.remove("empty"); $("stepsBar").hidden = false; $("resNote").textContent = "";
+  const ai = conicAreaInfo(q.c);
+  let tex;
+  if (!ai) tex = "\\text{面積を求められません}";
+  else if (q.kind === "circle" && ai.q) tex = "S=\\pi r^{2}=\\pi\\cdot" + texQ(ai.q.a2) + "=" + conicAreaTexVal(q.c, ai) + "\\approx " + decTex(ai.val);
+  else if (ai.q) tex = "S=\\pi ab=" + conicAreaTexVal(q.c, ai) + "\\approx " + decTex(ai.val);
+  else tex = "S=" + conicAreaTexVal(q.c, ai) + "\\approx " + decTex(ai.val);
+  try { katex.render(tex, box, { displayMode: true, throwOnError: true, strict: "ignore" }); } catch (e) { box.textContent = "S ≈ " + (ai ? decTex(ai.val) : ""); }
+  $("regionMsg").textContent = "円・楕円の内側全体の面積を出しています(直線などと囲まれる部分は次の段階で対応します)"; $("regionMsg").className = "msg";
+  renderSteps();
+}
 function renderResult() {
   const box = $("resMath"), wrapBox = $("result");
+  if (conicWhole()) { renderConicResult(); return; }
   if (!regionOn() || !region || !region.ok || !info1 || !info2) {
     box.textContent = ""; $("resNote").textContent = "";
     const can = !!(fn && ($("showXi").checked || $("showYi").checked)); // 積分領域がなくても、切片の途中式を出せる
@@ -1845,6 +1932,22 @@ function renderSteps() {
   box.hidden = !on; box.innerHTML = "";
   $("nfBox").hidden = !(on && region && region.ok && region.exact && region.exact.kind === "surd" && region.interior.length === 0);
   if (!on) return;
+  if (conicWhole()) { // 円・楕円全体の面積の途中式
+    $("nfBox").hidden = true;
+    const q = cn[0], ai = conicAreaInfo(q.c);
+    const mm = t => { const d = document.createElement("div"); d.className = "stepmsg"; d.textContent = t; box.appendChild(d); };
+    const hd = t => { const d = document.createElement("div"); d.className = "stephead"; d.textContent = t; box.appendChild(d); };
+    hd("【面積を求める】");
+    if (!ai) { mm("面積を求められません"); return; }
+    if (!ai.q) { mm("傾いた楕円や、係数が分数で表せない式は、途中式を表示できません(面積は公式 S=π(−F)/√(AC−B²/4) による値です)"); return; }
+    conicAreaSteps(q.c, ai, q.kind === "circle").forEach(s => {
+      const c = document.createElement("div"); c.className = "stepcap"; c.textContent = s.cap; box.appendChild(c);
+      if (!s.tex) return;
+      const t = document.createElement("div"); box.appendChild(t);
+      try { katex.render(s.tex, t, { displayMode: true, throwOnError: true, strict: "ignore" }); } catch (e) { t.textContent = s.tex; }
+    });
+    return;
+  }
   const msg = t => { const d = document.createElement("div"); d.className = "stepmsg"; d.textContent = t; box.appendChild(d); };
   const head = t => { const d = document.createElement("div"); d.className = "stephead"; d.textContent = t; box.appendChild(d); };
   const sub = t => { const d = document.createElement("div"); d.className = "stepsub"; d.textContent = t; box.appendChild(d); };

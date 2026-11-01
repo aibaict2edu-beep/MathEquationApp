@@ -118,7 +118,7 @@
   #diffPanel .dpRow { gap:6px; margin:1px 0; }
   #diffPanel button { min-height:28px; padding:2px 8px; font-size:12px; }
   #diffPanel label { font-size:11px; }
-  #diffArrow { width:38px; height:38px; font-size:22px; border-radius:8px; }
+  #diffArrow { width:76px; height:76px; font-size:44px; border-radius:12px; }
   .diffInfo { font-size:.82em; min-height:20px; }
   #diffHandle { font-size:10px; }
   body.focus > header, body.focus #left { display:none; }
@@ -136,7 +136,7 @@
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v16</span>
+  <span style="font-size:12px;opacity:.85">試作版 v17</span>
 </header>
 
 <main id="app">
@@ -251,6 +251,8 @@
           <button id="btnAuto">y範囲を自動調整</button>
         </div>
         <div class="msg">拡大・縮小・初期範囲は、グラフの右下のボタンでも操作できます。</div>
+        <div class="row"><label><input type="checkbox" id="equalScale" checked> 縦横の目盛りの長さを同じにする</label></div>
+        <div class="msg">オンのとき、「⌂」・拡大表示・画面の向きの変更・範囲の反映で、枠の縦横比に合わせて範囲を自動で調整します。sin のように横を長く見せたいときはオフにします。</div>
         <h2 class="subh">横軸</h2>
         <div class="row">
           <label>横軸:
@@ -952,7 +954,21 @@ function setupGraph() {
   const r = gc.getBoundingClientRect();
   gc.width = Math.round(r.width * dpr); gc.height = Math.round(r.height * dpr);
   gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (applyEqual()) { syncInputs(); refreshAll(); return; }
   drawGraph();
+}
+function applyEqual() { // 縦横の目盛りの長さを同じにする(見える範囲が小さくならないよう、広いほうに合わせて広げる)
+  const eq = document.getElementById("equalScale");
+  if (!eq || !eq.checked) return false;
+  const r = gc.getBoundingClientRect(); if (!(r.width > 0 && r.height > 0)) return false;
+  const rx = view.xmax - view.xmin, ry = view.ymax - view.ymin;
+  if (!(rx > 0 && ry > 0)) return false;
+  const ppu = Math.min(r.width / rx, r.height / ry);
+  const hx = r.width / ppu / 2, hy = r.height / ppu / 2;
+  if (Math.abs(hx * 2 - rx) < rx * 1e-9 && Math.abs(hy * 2 - ry) < ry * 1e-9) return false;
+  const cx = (view.xmin + view.xmax) / 2, cy = (view.ymin + view.ymax) / 2;
+  view = { xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy };
+  return true;
 }
 function niceStep(range, n) {
   const raw = range / (n || 8), p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
@@ -1113,7 +1129,7 @@ function drawFromInput() {
   }
   $("exprInfo").textContent = ""; // 正常時は表示しない(エラーはgraphMsgに出る)
   const trigNow = hasTrig(); // 三角関数を初めて描くときは、範囲が初期値のままなら -2π〜2π に合わせる
-  if (trigNow && !lastTrig && axisKind() !== "num" && isInitialView()) { view = defaultView(); syncInputs(); }
+  if (trigNow && !lastTrig && axisKind() !== "num" && isInitialView()) { view = defaultView(); applyEqual(); syncInputs(); }
   lastTrig = trigNow;
   if (!readInputs()) return;
   refreshAll();
@@ -1218,9 +1234,9 @@ $("selL").addEventListener("change", refreshAll);
 $("selR").addEventListener("change", refreshAll);
 $("btnIvApply").onclick = refreshAll;
 ["ivA", "ivBv"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter") refreshAll(); }));
-$("btnApplyRange").onclick = () => { if (readInputs()) { $("graphMsg").textContent = ""; refreshAll(); } };
+$("btnApplyRange").onclick = () => { if (readInputs()) { applyEqual(); syncInputs(); $("graphMsg").textContent = ""; refreshAll(); } };
 $("btnAuto").onclick = () => { if (readInputs()) autoY(); };
-$("btnReset").onclick = () => { view = defaultView(); zoomStack.length = 0; if (typeof updateZoomBack === "function") updateZoomBack(); syncInputs(); refreshAll(); };
+$("btnReset").onclick = () => { view = defaultView(); applyEqual(); zoomStack.length = 0; if (typeof updateZoomBack === "function") updateZoomBack(); syncInputs(); refreshAll(); };
 function zoom(f) {
   const cx = (view.xmin + view.xmax) / 2, cy = (view.ymin + view.ymax) / 2;
   const hx = (view.xmax - view.xmin) / 2 * f, hy = (view.ymax - view.ymin) / 2 * f;
@@ -1259,7 +1275,10 @@ function defaultView() {
   if (axisKind() !== "num" && hasTrig()) { const a = hasTan() ? 4 : 2; return { xmin: -2 * Math.PI, xmax: 2 * Math.PI, ymin: -a, ymax: a }; }
   return { xmin: -10, xmax: 10, ymin: -10, ymax: 10 };
 }
-function isInitialView() { return view.xmin === -10 && view.xmax === 10 && view.ymin === -10 && view.ymax === 10; }
+function isInitialView() { // 初期の-10〜10(縦横を同じにするため片方だけ広がっている場合も含む)
+  const rx = view.xmax - view.xmin, ry = view.ymax - view.ymin, c = Math.abs(view.xmin + view.xmax) + Math.abs(view.ymin + view.ymax);
+  return c < 1e-9 && Math.abs(Math.min(rx, ry) - 20) < 1e-9 && ($("equalScale").checked || (rx === 20 && ry === 20));
+}
 function piStep(W) { // 目盛りの間隔(込み合うときは倍々にして間引く)
   const D = +$("axisStep").value || 2, base = Math.PI / D, ppu = W / (view.xmax - view.xmin);
   const mults = D === 6 ? [1, 2, 3, 6, 12, 24, 48, 96, 192, 384] : [1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
@@ -1438,6 +1457,7 @@ gc.addEventListener("pointerup", e => {
 });
 gc.addEventListener("pointercancel", () => { tapStart = null; });
 ["showXi", "showYi", "showTan", "curveW", "tickSize"].forEach(id => $(id).addEventListener("change", drawGraph));
+$("equalScale").addEventListener("change", () => { if (applyEqual()) syncInputs(); refreshAll(); });
 $("showCoords").addEventListener("change", () => { if (region && region.inter) renderInter(region.inter); drawGraph(); });
 $("diffClear").onclick = () => { diffPt = null; updateDiffUI(); drawGraph(); };
 // 浮かせた微分パネルをドラッグで動かす(ボタン・チェックは通常どおり操作できる)
@@ -1637,13 +1657,15 @@ async function savePng() {
   try { drawGraph(); } finally { gctx = saved; }
   const blob = await new Promise(res => c.toBlob(res, "image/png"));
   if (!blob) { alert("画像を作れませんでした"); return; }
-  const file = new File([blob], "graph.png", { type: "image/png" });
+  const d = new Date(), z = n => String(n).padStart(2, "0");
+  const fname = "graph_" + d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + "_" + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds()) + ".png";
+  const file = new File([blob], fname, { type: "image/png" });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file], title: "グラフ" }); return; }
     catch (e) { if (e && e.name === "AbortError") return; }
   }
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = "graph.png";
+  a.href = URL.createObjectURL(blob); a.download = fname;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }

@@ -10,6 +10,7 @@
 <style>
   :root { --bg:#f4f6fa; --card:#fff; --ink:#1d2433; --sub:#5b667a; --accent:#2457d6; --line:#d5dbe6; --err:#c0392b; }
   * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
   html,body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif; -webkit-text-size-adjust:100%; }
   header { padding:12px 16px; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:space-between; gap:8px; }
   header h1 { font-size:18px; margin:0; }
@@ -22,11 +23,14 @@
   button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
   button.on { background:#e8eefc; border-color:var(--accent); }
   button:disabled { opacity:.45; cursor:not-allowed; }
-  input[type=text], input[type=password], input[type=number] { font:inherit; padding:10px; min-height:44px; border:1px solid var(--line); border-radius:8px; width:100%; }
+  input[type=text], input[type=password], input[type=number], select { font:inherit; padding:10px; min-height:44px; border:1px solid var(--line); border-radius:8px; width:100%; background:#fff; }
   input[type=number] { width:90px; }
+  select { width:auto; }
+  .small { width:110px !important; }
   #pad { width:100%; height:300px; background:#fff; border:2px dashed var(--line); border-radius:10px; touch-action:none; display:block; }
   #graph { width:100%; aspect-ratio:1/1; background:#fff; border:1px solid var(--line); border-radius:10px; touch-action:none; display:block; }
-  #preview { min-height:70px; padding:10px; border:1px solid var(--line); border-radius:10px; font-size:1.6em; overflow-x:auto; display:flex; align-items:center; }
+  .preview { min-height:60px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; font-size:1.5em; overflow-x:auto; display:flex; align-items:center; margin-top:6px; }
+  #result { min-height:56px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; overflow-x:auto; font-size:1.15em; }
   .msg { font-size:13px; color:var(--sub); min-height:1.4em; }
   .msg.err { color:var(--err); }
   code { background:#eef1f6; padding:1px 5px; border-radius:4px; font-size:12px; }
@@ -34,47 +38,82 @@
   summary { cursor:pointer; color:var(--accent); min-height:32px; }
   .chips button { padding:6px 10px; min-height:36px; font-size:13px; }
   label { font-size:13px; color:var(--sub); display:flex; align-items:center; gap:4px; }
+  .fbox { margin-top:10px; }
+  .fbox > .tag { font-size:13px; font-weight:600; }
+  .tag.f1 { color:#d62d2d; } .tag.f2 { color:#2457d6; }
+  .sub { border-top:1px solid var(--line); margin-top:12px; padding-top:10px; }
+  #gwrap { position:relative; }
+  #diffPanel { position:absolute; top:8px; right:8px; z-index:5; background:rgba(255,255,255,0.9); border:1px solid var(--line); border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.18); padding:4px 8px 6px; max-width:calc(100% - 16px); touch-action:none; user-select:none; -webkit-user-select:none; }
+  #diffHandle { font-size:11px; color:var(--sub); cursor:move; padding:2px 0 3px; }
+  #diffPanel .dpRow { display:flex; align-items:center; gap:8px; margin:2px 0; }
+  #diffPanel button { min-height:32px; padding:4px 10px; font-size:13px; }
+  #diffPanel label { font-size:12px; }
+  #diffArrow { width:54px; height:54px; border:2px solid var(--line); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:30px; font-weight:700; color:#999; flex:none; background:#fff; }
+  .diffInfo { min-height:24px; font-size:1em; overflow-x:auto; }
+
+  /* ===== v8 画面構成: グラフを常に見える場所に固定し、操作はタブにまとめる ===== */
+  main#app { max-width:none; margin:0; padding:10px; display:grid; gap:12px; grid-template-columns:1fr; }
+  #left { display:grid; gap:12px; align-content:start; min-height:0; }
+  #right { order:-1; position:sticky; top:0; z-index:20; background:var(--bg); padding-bottom:6px; min-height:0; }
+  #gwrap { position:relative; width:100%; height:40vh; min-height:240px; }
+  #graph { width:100%; height:100%; aspect-ratio:auto; }
+  #gbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 4px; }
+  #gbar button { padding:8px 12px; min-height:42px; }
+  #modeStrip { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:44px; margin:2px 0 6px; }
+  #modeStrip #annHint { flex:1; min-width:150px; min-height:0; }
+  #annOpts { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  #annOpts[hidden] { display:none !important; }
+  #annOpts .col { width:34px; min-height:34px; height:34px; padding:0; border-radius:50%; }
+  #annOpts .col.on { outline:3px solid var(--accent); outline-offset:1px; }
+  #annOpts select { min-height:36px; padding:4px 8px; }
+  #annOpts button:not(.col) { min-height:36px; padding:4px 10px; }
+  #zoomBtns { position:absolute; right:8px; bottom:8px; z-index:4; display:flex; flex-direction:column; gap:6px; }
+  #zoomBtns button { width:40px; height:40px; min-height:40px; padding:0; border-radius:20px; font-size:20px; line-height:1; background:rgba(255,255,255,0.92); box-shadow:0 1px 6px rgba(0,0,0,.25); }
+  #result { margin-top:6px; }
+  #result:empty { display:none; }
+  .tabbar { display:flex; gap:4px; margin:-2px 0 10px; border-bottom:2px solid var(--line); }
+  .tabbtn { flex:1; border-radius:8px 8px 0 0; border-bottom:none; min-height:44px; }
+  .tabbtn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .subh { margin-top:16px; padding-top:10px; border-top:1px solid var(--line); }
+  #pad { height:260px; }
+  .preview { min-height:50px; font-size:1.35em; }
+  @media (min-width:900px) {
+    html, body { height:100%; }
+    body { display:flex; flex-direction:column; overflow:hidden; }
+    header { flex:none; }
+    main#app { flex:1; min-height:0; grid-template-columns:minmax(380px, 440px) 1fr; grid-template-rows:minmax(0, 1fr); }
+    #left { overflow-y:auto; padding-right:4px; }
+    #right { order:0; position:static; overflow-y:auto; padding-bottom:0; }
+    #gwrap { width:min(100%, calc(100vh - 300px)); height:auto; aspect-ratio:1/1; min-height:0; }
+  }
+  @supports (height:100dvh) {
+    @media (min-width:900px) {
+      body { height:100dvh; }
+      #gwrap { width:min(100%, calc(100dvh - 300px)); }
+    }
+  }
 </style>
 </head>
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版</span>
+  <span style="font-size:12px;opacity:.85">試作版 v8</span>
 </header>
 
-<main>
-  <!-- 左：入力 -->
-  <div style="display:grid;gap:12px;align-content:start">
-    <section>
-      <h2>① 手書き入力</h2>
-      <canvas id="pad"></canvas>
-      <div class="row">
-        <button id="btnPen" class="on">ペン</button>
-        <button id="btnEraser">消しゴム</button>
-        <button id="btnUndo">1つ戻す</button>
-        <button id="btnClear">全消去</button>
-        <label><input type="checkbox" id="penOnly"> ペンのみ(指を無視)</label>
+<main id="app">
+  <!-- 左:式の入力(常に表示)と、タブ付きの操作パネル -->
+  <div id="left">
+    <section id="formulaBox">
+      <div class="fbox" style="margin-top:0">
+        <div class="tag f1">式1(赤)</div>
+        <input type="text" id="latex" placeholder="例: y=x^2-3x+1" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div class="preview" id="preview"></div>
       </div>
-      <div class="row">
-        <button id="btnRecognize" class="primary" disabled>認識する</button>
-        <span class="msg" id="recMsg">APIキーを設定すると有効になります</span>
+      <div class="fbox" id="f2box" hidden>
+        <div class="tag f2">式2(青)</div>
+        <input type="text" id="latex2" placeholder="例: y=2x+1" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div class="preview" id="preview2"></div>
       </div>
-      <details id="settings">
-        <summary>設定(APIキー)</summary>
-        <div class="row" style="flex-direction:column;align-items:stretch">
-          <label>Claude APIキー(この端末のブラウザにだけ保存されます)</label>
-          <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off">
-          <label>モデル名</label>
-          <input type="text" id="modelName" value="claude-sonnet-5-5">
-          <div class="row"><button id="btnSaveKey">保存</button><button id="btnDelKey">キーを削除</button></div>
-          <div class="msg">キーはソースに書かれません。公開リポジトリにキーを入れないでください。</div>
-        </div>
-      </details>
-    </section>
-
-    <section>
-      <h2>認識結果(LaTeX)※修正できます</h2>
-      <input type="text" id="latex" placeholder="例: y=x^2-3x+1" autocapitalize="off" autocorrect="off" spellcheck="false">
       <div class="row chips">
         <span class="msg">例:</span>
         <button data-ex="y=x^2-3x+1">x²-3x+1</button>
@@ -84,33 +123,194 @@
         <button data-ex="y=2^{x}">2^x</button>
         <button data-ex="y=\frac{x^2-1}{x+2}">分数式</button>
       </div>
-      <h2 style="margin-top:12px">② 画面表示</h2>
-      <div id="preview"></div>
       <div class="row">
         <button id="btnGraph" class="primary">グラフを描く</button>
         <span class="msg" id="graphMsg"></span>
       </div>
       <div class="msg" id="exprInfo"></div>
     </section>
+
+    <section id="tabsBox">
+      <div class="tabbar">
+        <button class="tabbtn on" data-tab="draw">手書き</button>
+        <button class="tabbtn" data-tab="analysis">解析</button>
+        <button class="tabbtn" data-tab="view">表示</button>
+        <button class="tabbtn" data-tab="settings">設定</button>
+      </div>
+
+      <!-- タブ1: 手書き -->
+      <div class="tabpanel" data-tab="draw">
+        <canvas id="pad"></canvas>
+        <div class="row">
+          <button id="btnPen" class="on">ペン</button>
+          <button id="btnEraser">消しゴム</button>
+          <button id="btnUndo">1つ戻す</button>
+          <button id="btnClear">全消去</button>
+        </div>
+        <div class="row" id="targetRow" hidden>
+          <span class="msg">認識結果の入力先:</span>
+          <button id="btnT1" class="on">式1</button>
+          <button id="btnT2">式2</button>
+          <label><input type="checkbox" id="autoClear" checked> 認識後に手書きを消す</label>
+        </div>
+        <div class="row">
+          <button id="btnRecognize" class="primary" disabled>認識する</button>
+          <span class="msg" id="recMsg">APIキーを設定すると有効になります</span>
+        </div>
+      </div>
+
+      <!-- タブ2: 解析(微分・積分) -->
+      <div class="tabpanel" data-tab="analysis" hidden>
+        <h2>微分</h2>
+        <div class="msg">グラフの上のバーで「微分」を選び、曲線の近くをタップすると、その点の微分係数・接線・増減(↗↘0)が出ます。頂点や交点の近くではその点に吸着します。</div>
+        <div class="row"><button id="goDiff">微分モードにする</button></div>
+
+        <h2 class="subh">積分(面積)</h2>
+        <label style="font-size:15px;color:var(--ink)"><input type="checkbox" id="regionMode" style="width:20px;height:20px"> 積分領域モード(囲まれた部分の面積を出す)</label>
+        <div id="regionPanel" hidden>
+          <div class="row">
+            <label>領域の種類:
+              <select id="regionType">
+                <option value="curves">式1と式2の間</option>
+                <option value="axis">式1とx軸の間</option>
+              </select>
+            </label>
+          </div>
+          <div class="row chips">
+            <span class="msg">領域の例:</span>
+            <button data-region="y=x^2|y=x+2">x² と x+2</button>
+            <button data-region="y=x^2-3x+1|y=2x+1">x²-3x+1 と 2x+1</button>
+            <button data-region="y=x^2|y=x+1">x² と x+1(√を含む)</button>
+            <button data-region="y=x^3|y=x">x³ と x(3交点)</button>
+          </div>
+          <div class="row">
+            <span class="msg">区間:</span>
+            <label><input type="radio" name="ivm" value="A" checked> A 交点の間(自動)</label>
+            <label><input type="radio" name="ivm" value="B"> B 交点を選ぶ</label>
+            <label><input type="radio" name="ivm" value="C"> C 区間を入力</label>
+          </div>
+          <div class="row" id="ivB" hidden>
+            <label>左端: <select id="selL"></select></label>
+            <label>右端: <select id="selR"></select></label>
+          </div>
+          <div class="row" id="ivC" hidden>
+            <label>a = <input type="text" id="ivA" class="small" placeholder="例: 0" inputmode="decimal"></label>
+            <label>b = <input type="text" id="ivBv" class="small" placeholder="例: pi/2" inputmode="decimal"></label>
+            <button id="btnIvApply">反映</button>
+          </div>
+          <div class="msg" id="interList"></div>
+          <div class="msg" id="regionMsg"></div>
+          <div class="msg">面積の式は、グラフの下に表示されます。</div>
+        </div>
+      </div>
+
+      <!-- タブ3: 表示 -->
+      <div class="tabpanel" data-tab="view" hidden>
+        <h2>表示範囲</h2>
+        <div class="row"><label>x:<input type="number" id="xmin" value="-10" step="any"> 〜 <input type="number" id="xmax" value="10" step="any"></label></div>
+        <div class="row"><label>y:<input type="number" id="ymin" value="-10" step="any"> 〜 <input type="number" id="ymax" value="10" step="any"></label></div>
+        <div class="row">
+          <button id="btnApplyRange">範囲を反映</button>
+          <button id="btnAuto">y範囲を自動調整</button>
+        </div>
+        <div class="msg">拡大・縮小・初期範囲は、グラフの右下のボタンでも操作できます。</div>
+        <h2 class="subh">横軸</h2>
+        <div class="row">
+          <label>横軸:
+            <select id="axisMode">
+              <option value="auto">自動</option>
+              <option value="num">数値</option>
+              <option value="pi">π(ラジアン)</option>
+              <option value="deg">度(°)</option>
+            </select>
+          </label>
+          <label>刻み:
+            <select id="axisStep">
+              <option value="2" selected>π/2(90°)</option>
+              <option value="4">π/4(45°)</option>
+              <option value="6">π/6(30°)</option>
+              <option value="1">π(180°)</option>
+            </select>
+          </label>
+        </div>
+        <div class="msg">「自動」は sin・cos・tan を含む式のときπ表示になります。目盛りが込み合うときは間引きます(拡大すると細かくなります)。</div>
+        <h2 class="subh">交点の点</h2>
+        <div class="row">
+          <label><input type="checkbox" id="showXi" checked> x切片</label>
+          <label><input type="checkbox" id="showYi" checked> y切片</label>
+          <label><input type="checkbox" id="showCoords"> 座標を表示</label>
+        </div>
+        <div class="msg">座標は、「移動」モードで点をタップすると1つずつ表示・非表示にできます。</div>
+      </div>
+
+      <!-- タブ4: 設定 -->
+      <div class="tabpanel" data-tab="settings" hidden>
+        <h2>手書きの認識(Claude API)</h2>
+        <div class="row" style="flex-direction:column;align-items:stretch">
+          <label>Claude APIキー(この端末のブラウザにだけ保存されます)</label>
+          <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off">
+          <label>モデル名</label>
+          <input type="text" id="modelName" value="claude-sonnet-5-5">
+          <div class="row"><button id="btnSaveKey">保存</button><button id="btnDelKey">キーを削除</button></div>
+          <div class="msg">キーはソースに書かれません。公開リポジトリにキーを入れないでください。</div>
+        </div>
+        <h2 class="subh">入力</h2>
+        <label><input type="checkbox" id="penOnly"> ペンのみ(指を無視)</label>
+        <div class="msg">オンにすると、手書き欄では指の入力を無視します。グラフのペン・文字・消しゴムのときは、指のドラッグがグラフの移動になります。</div>
+      </div>
+    </section>
   </div>
 
-  <!-- 右：グラフ -->
-  <section>
-    <h2>グラフ</h2>
-    <canvas id="graph"></canvas>
-    <div class="row">
-      <label>x:<input type="number" id="xmin" value="-10" step="any"> 〜 <input type="number" id="xmax" value="10" step="any"></label>
-      <label>y:<input type="number" id="ymin" value="-10" step="any"> 〜 <input type="number" id="ymax" value="10" step="any"></label>
+  <!-- 右:グラフ(常に表示) -->
+  <div id="right">
+    <div id="gbar">
+      <button id="gmMove" class="on">移動</button>
+      <button id="gmDiff">微分</button>
+      <button id="gmPen">ペン</button>
+      <button id="gmText">文字</button>
+      <button id="gmErase">消しゴム</button>
+      <span style="flex:1"></span>
+      <button id="annUndo">書き込みを戻す</button>
+      <button id="btnPng" class="primary">PNG保存</button>
     </div>
-    <div class="row">
-      <button id="btnApplyRange">範囲を反映</button>
-      <button id="btnZoomIn">拡大</button>
-      <button id="btnZoomOut">縮小</button>
-      <button id="btnAuto">y範囲を自動調整</button>
-      <button id="btnReset">初期範囲</button>
+    <div id="modeStrip">
+      <div class="msg" id="annHint"></div>
+      <div id="annOpts" hidden>
+        <button class="col on" data-c="#111111" style="background:#111111" aria-label="黒"></button>
+        <button class="col" data-c="#d62d2d" style="background:#d62d2d" aria-label="赤"></button>
+        <button class="col" data-c="#2457d6" style="background:#2457d6" aria-label="青"></button>
+        <button class="col" data-c="#1e8a4c" style="background:#1e8a4c" aria-label="緑"></button>
+        <button class="col" data-c="#e67e22" style="background:#e67e22" aria-label="橙"></button>
+        <label>太さ
+          <select id="annW"><option value="2">細</option><option value="4" selected>中</option><option value="7">太</option></select>
+        </label>
+        <label>文字
+          <select id="annSize"><option value="14">小</option><option value="18" selected>中</option><option value="26">大</option></select>
+        </label>
+        <button id="annClear">全消去</button>
+      </div>
     </div>
-    <div class="msg">対応: <code>y=f(x)</code> 形式。分数・累乗・√・三角関数・指数・対数・絶対値に対応。グラフ上をドラッグで移動できます。</div>
-  </section>
+    <div id="gwrap">
+      <canvas id="graph"></canvas>
+      <div id="diffPanel" hidden>
+        <div id="diffHandle">≡ 微分(ドラッグで移動できます)</div>
+        <div class="dpRow">
+          <div id="diffArrow">—</div>
+          <div id="diffInfo" class="diffInfo"></div>
+        </div>
+        <div class="dpRow">
+          <label><input type="checkbox" id="showTan" checked> 接線を表示</label>
+          <button id="diffClear">点を消す</button>
+        </div>
+      </div>
+      <div id="zoomBtns">
+        <button id="btnZoomIn" aria-label="拡大">＋</button>
+        <button id="btnZoomOut" aria-label="縮小">−</button>
+        <button id="btnReset" aria-label="初期範囲">⌂</button>
+      </div>
+    </div>
+    <div id="result"></div>
+  </div>
 </main>
 
 <script>
@@ -124,6 +324,7 @@ let strokes = [], cur = null, tool = "pen";
 function setupPad() {
   const dpr = window.devicePixelRatio || 1;
   const r = pad.getBoundingClientRect();
+  if (!r.width) return; // 非表示のタブにあるとき
   pad.width = Math.round(r.width * dpr);
   pad.height = Math.round(r.height * dpr);
   pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -178,6 +379,25 @@ $("btnUndo").onclick = () => { strokes.pop(); redrawPad(); };
 $("btnClear").onclick = () => { strokes = []; redrawPad(); };
 window.addEventListener("resize", () => { setupPad(); setupGraph(); });
 
+/* ============ 入力先(式1/式2) ============ */
+let target = 1;
+function setTarget(t) {
+  target = t;
+  $("btnT1").classList.toggle("on", t === 1);
+  $("btnT2").classList.toggle("on", t === 2);
+}
+$("btnT1").onclick = () => setTarget(1);
+$("btnT2").onclick = () => setTarget(2);
+const regionOn = () => $("regionMode").checked;
+const useG = () => regionOn() && $("regionType").value === "curves";
+function updateModeUI() {
+  const on = regionOn(), curves = useG();
+  $("regionPanel").hidden = !on;
+  $("f2box").hidden = !(on && curves);
+  $("targetRow").hidden = !(on && curves);
+  if (!(on && curves)) setTarget(1);
+}
+
 /* ============ APIキー・認識 ============ */
 function loadKey() {
   try {
@@ -221,6 +441,7 @@ $("btnRecognize").onclick = async () => {
   if (!strokes.some(s => !s.erase)) { setRec("先に数式を書いてください", true); return; }
   const key = $("apiKey").value.trim();
   const model = $("modelName").value.trim() || "claude-sonnet-5-5";
+  const which = (useG() && target === 2) ? 2 : 1;
   setRec("認識中…"); $("btnRecognize").disabled = true;
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -244,7 +465,13 @@ $("btnRecognize").onclick = async () => {
     let t = (data.content && data.content[0] && data.content[0].text || "").trim();
     t = t.replace(/^```[a-z]*\n?|```$/gim, "").replace(/^\$\$?|\$\$?$/g, "").trim();
     if (!t || t === "UNREADABLE") { setRec("読み取れませんでした。書き直してください", true); }
-    else { $("latex").value = t; renderPreview(); setRec("認識しました。違っていれば下の欄で修正できます"); drawFromInput(); }
+    else {
+      $(which === 2 ? "latex2" : "latex").value = t;
+      renderPreviews();
+      setRec("式" + which + "に認識しました。違っていれば入力欄で修正できます");
+      if (useG() && $("autoClear").checked) { strokes = []; redrawPad(); if (which === 1) setTarget(2); }
+      drawFromInput();
+    }
   } catch (err) {
     setRec("認識に失敗: " + err.message, true);
   } finally { updateBtnOnly(); }
@@ -253,18 +480,35 @@ function setRec(m, err) { $("recMsg").textContent = m; $("recMsg").className = "
 function updateBtnOnly() { $("btnRecognize").disabled = !$("apiKey").value.trim(); }
 
 /* ============ 数式表示 ============ */
-function renderPreview() {
-  const s = $("latex").value.trim();
-  const box = $("preview");
+function renderOne(inputId, boxId) {
+  const s = normalizeInput($(inputId).value).trim();
+  const box = $(boxId);
   if (!s) { box.textContent = ""; return; }
-  try { katex.render(s, box, { throwOnError: true, displayMode: false }); }
+  try { katex.render(s, box, { throwOnError: true, displayMode: false, strict: "ignore" }); }
   catch (e) { box.textContent = "(表示できない式です)"; }
 }
-$("latex").addEventListener("input", renderPreview);
+function renderPreviews() { renderOne("latex", "preview"); renderOne("latex2", "preview2"); }
+[["latex", "preview"], ["latex2", "preview2"]].forEach(([id, box]) => {
+  const el = $(id);
+  el.addEventListener("input", e => { if (e.isComposing) return; renderOne(id, box); }); // 変換中は待つ
+  el.addEventListener("compositionend", () => renderOne(id, box));
+  el.addEventListener("change", () => { el.value = normalizeInput(el.value); renderOne(id, box); }); // 確定時に半角へ
+  el.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing) { el.value = normalizeInput(el.value); renderOne(id, box); drawFromInput(); } });
+});
 document.querySelectorAll("[data-ex]").forEach(b => b.onclick = () => {
-  $("latex").value = b.dataset.ex; renderPreview(); drawFromInput();
+  const id = (useG() && target === 2) ? "latex2" : "latex";
+  $(id).value = b.dataset.ex; renderPreviews(); drawFromInput();
+});
+document.querySelectorAll("[data-region]").forEach(b => b.onclick = () => {
+  const [a, c] = b.dataset.region.split("|");
+  $("regionType").value = "curves";
+  $("regionMode").checked = true; updateModeUI();
+  $("latex").value = a; $("latex2").value = c;
+  setIvm("A");
+  renderPreviews(); drawFromInput();
 });
 
+/*LATEX_START*/
 /* ============ LaTeX → math.js 式 ============ */
 function grabBrace(s, i) { // s[i]==='{'
   let d = 0;
@@ -333,6 +577,22 @@ function fixFuncs(s) { // sin x → sin(x), sin^2 x → (sin(x))^2
   }
   return out + s.slice(last);
 }
+// 日本語入力(全角)で打たれた式を半角に直す: ｙ＝ｘ＾２−３ｘ → y=x^2-3x
+function normalizeInput(s) {
+  return String(s)
+    .replace(/[！-～]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)) // 全角の英数字・記号 → 半角
+    .replace(/　/g, " ")
+    .replace(/[−‐‑‒–—―ー]/g, "-") // −‐–—― と長音「ー」 → マイナス
+    .replace(/×/g, " \\times ").replace(/÷/g, " \\div ")
+    .replace(/π/g, " \\pi ")
+    .replace(/²/g, "^2").replace(/³/g, "^3")
+    .replace(/√\s*\(([^()]*)\)/g, "\\sqrt{$1}")          // √(x+1) → \sqrt{x+1}
+    .replace(/√\s*([0-9.]+|[a-zA-Z])/g, "\\sqrt{$1}");  // √x, √2 → \sqrt{x}, \sqrt{2}
+}
+function rhsOf(src) {
+  const m = /^\s*(?:y|f\s*\(\s*x\s*\))\s*=(.*)$/.exec(src);
+  return (m ? m[1] : src).trim();
+}
 function latexToExpr(src) {
   let s = " " + src + " ";
   s = s.replace(/\\left|\\right|\\displaystyle|\\,|\\;|\\:|\\!|\\quad|\\qquad|\\ /g, " ");
@@ -344,7 +604,6 @@ function latexToExpr(src) {
   }
   s = convFrac(s);
   s = convSqrt(s);
-  s = s.replace(/\\(a?)r?c?(sin|cos|tan)h?/g, m => m); // no-op
   s = s.replace(/\\arcsin/g, "asin").replace(/\\arccos/g, "acos").replace(/\\arctan/g, "atan")
        .replace(/\\(sinh|cosh|tanh|sin|cos|tan|cot|sec|csc|exp)\b/g, "$1")
        .replace(/\\ln\b/g, "log").replace(/\\log\b/g, "log10")
@@ -362,11 +621,281 @@ function latexToExpr(src) {
        .replace(/(?<![a-zA-Z])x\s*\(/g, "x*(");
   return s.trim();
 }
+/*LATEX_END*/
+
+/*REGION_START*/
+/* ============ 交点・面積の計算(分数・数値) ============ */
+function gcd(a, b) { a = Math.abs(a); b = Math.abs(b); while (b) { const t = a % b; a = b; b = t; } return a; }
+function Q(n, d) {
+  if (d === 0) throw new Error("0で割れません");
+  if (d < 0) { n = -n; d = -d; }
+  const g = gcd(n, d) || 1;
+  return { n: (n / g) || 0, d: d / g };
+}
+const qAdd = (a, b) => Q(a.n * b.d + b.n * a.d, a.d * b.d);
+const qSub = (a, b) => Q(a.n * b.d - b.n * a.d, a.d * b.d);
+const qMul = (a, b) => Q(a.n * b.n, a.d * b.d);
+const qDiv = (a, b) => Q(a.n * b.d, a.d * b.n);
+const qNum = a => a.n / a.d;
+const qZero = () => Q(0, 1);
+
+function qFromFloat(x, maxDen = 2000, tol = 1e-9) { // 連分数で有理数に近似
+  if (!isFinite(x)) return null;
+  const sign = x < 0 ? -1 : 1, v = Math.abs(x);
+  let h1 = 1, h0 = 0, k1 = 0, k0 = 1, b = v;
+  for (let i = 0; i < 40; i++) {
+    const a = Math.floor(b);
+    const h2 = a * h1 + h0, k2 = a * k1 + k0;
+    if (k2 > maxDen) break;
+    h0 = h1; h1 = h2; k0 = k1; k1 = k2;
+    if (Math.abs(v - h1 / k1) < tol * Math.max(1, v)) return Q(sign * h1, k1);
+    const fr = b - a; if (fr < 1e-12) break; b = 1 / fr;
+  }
+  return (k1 > 0 && Math.abs(v - h1 / k1) < tol * Math.max(1, v)) ? Q(sign * h1, k1) : null;
+}
+function qPolyEvalQ(co, x) { let p = qZero(); for (let j = co.length - 1; j >= 0; j--) p = qAdd(qMul(p, x), co[j]); return p; }
+function polyEvalNum(co, x) { let p = 0; for (let j = co.length - 1; j >= 0; j--) p = p * x + (typeof co[j] === "number" ? co[j] : qNum(co[j])); return p; }
+function qPolyIntegralQ(co, a, b) { // ∫_a^b
+  const F = x => {
+    let s = qZero(), xp = x;
+    for (let j = 0; j < co.length; j++) { s = qAdd(s, qMul(qMul(co[j], Q(1, j + 1)), xp)); xp = qMul(xp, x); }
+    return s;
+  };
+  return qSub(F(b), F(a));
+}
+function solveLin(A, b) {
+  const n = b.length;
+  for (let i = 0; i < n; i++) {
+    let p = i;
+    for (let r = i + 1; r < n; r++) if (Math.abs(A[r][i]) > Math.abs(A[p][i])) p = r;
+    if (Math.abs(A[p][i]) < 1e-14) return null;
+    [A[i], A[p]] = [A[p], A[i]]; [b[i], b[p]] = [b[p], b[i]];
+    for (let r = i + 1; r < n; r++) {
+      const f = A[r][i] / A[i][i];
+      for (let c = i; c < n; c++) A[r][c] -= f * A[i][c];
+      b[r] -= f * b[i];
+    }
+  }
+  const x = new Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = b[i];
+    for (let c = i + 1; c < n; c++) s -= A[i][c] * x[c];
+    x[i] = s / A[i][i];
+  }
+  return x;
+}
+// h(x) が有理数係数の多項式なら係数(低次→高次)を返す。そうでなければ null
+function fitPoly(h, maxDeg = 6) {
+  const test = [-3.3, -1.7, 0.37, 1.9, 2.6, 4.1, -5.2];
+  for (let d = 0; d <= maxDeg; d++) {
+    const nodes = []; for (let i = 0; i <= d; i++) nodes.push(i - Math.ceil(d / 2) + 0.5);
+    const ys = nodes.map(x => { try { return h(x); } catch (e) { return NaN; } });
+    if (ys.some(y => !isFinite(y))) return null;
+    const A = nodes.map(x => { const r = []; let p = 1; for (let j = 0; j <= d; j++) { r.push(p); p *= x; } return r; });
+    const co = solveLin(A, ys.slice());
+    if (!co) continue;
+    const ok = test.every(x => { const y = h(x); return isFinite(y) && Math.abs(y - polyEvalNum(co, x)) <= 1e-7 * (1 + Math.abs(y)); });
+    if (!ok) continue;
+    const q = co.map(c => qFromFloat(c, 5000, 1e-8));
+    if (q.some(v => !v)) return null;
+    const ok2 = test.every(x => { const y = h(x); return Math.abs(y - polyEvalNum(q, x)) <= 1e-8 * (1 + Math.abs(y)); });
+    if (!ok2) return null;
+    let deg = d; while (deg > 0 && q[deg].n === 0) deg--;
+    return q.slice(0, deg + 1);
+  }
+  return null;
+}
+function texQ(q) {
+  if (q.d === 1) return String(q.n);
+  return (q.n < 0 ? "-" : "") + "\\frac{" + Math.abs(q.n) + "}{" + q.d + "}";
+}
+function texSurd(u, w, m) { // u + w√m
+  let t = u.n !== 0 ? texQ(u) : "";
+  const neg = w.n < 0, aw = Q(Math.abs(w.n), w.d);
+  const coef = (aw.n === 1 && aw.d === 1) ? "" : texQ(aw);
+  return t + (neg ? "-" : (t ? "+" : "")) + coef + "\\sqrt{" + m + "}";
+}
+// 厳密な面積(分数 or 分数×√m)を試みる。できなければ null
+function exactArea(h, a, b, interior, numArea) {
+  const co = fitPoly(h);
+  if (!co) return null;
+  const pts = [a, ...interior, b];
+  const qs = pts.map(v => qFromFloat(v, 2000, 1e-9));
+  if (qs.every(q => q)) {
+    let tot = qZero();
+    for (let i = 0; i < qs.length - 1; i++) {
+      let I = qPolyIntegralQ(co, qs[i], qs[i + 1]);
+      if (I.n < 0) I = Q(-I.n, I.d);
+      tot = qAdd(tot, I);
+    }
+    if (Math.abs(qNum(tot) - numArea) > 1e-6 * (1 + Math.abs(numArea))) return null;
+    return { valTex: texQ(tot), aTex: texQ(qs[0]), bTex: texQ(qs[qs.length - 1]), val: qNum(tot) };
+  }
+  if (co.length === 3 && interior.length === 0) { // 2次式で、a,b が2つの解(無理数)
+    const A = co[2], B = co[1], C = co[0];
+    const D = qSub(qMul(B, B), qMul(Q(4, 1), qMul(A, C)));
+    if (D.n <= 0) return null;
+    const N = D.n * D.d;
+    let s = 1;
+    for (let t = Math.floor(Math.sqrt(N)); t >= 1; t--) { if (N % (t * t) === 0) { s = t; break; } }
+    const m = N / (s * s);
+    if (m <= 1) return null;
+    const coef = qDiv(Q(D.n * s, D.d * D.d), qMul(Q(6, 1), qMul(A, A)));
+    const u = qDiv(Q(-B.n, B.d), qMul(Q(2, 1), A));
+    const w = qDiv(Q(s, 2 * D.d), Q(Math.abs(A.n), A.d));
+    const lo = qNum(u) - qNum(w) * Math.sqrt(m), hi = qNum(u) + qNum(w) * Math.sqrt(m);
+    if (Math.abs(a - lo) > 1e-6 || Math.abs(b - hi) > 1e-6) return null;
+    const val = qNum(coef) * Math.sqrt(m);
+    if (Math.abs(val - numArea) > 1e-6 * (1 + Math.abs(numArea))) return null;
+    const cTex = (coef.n === 1 && coef.d === 1) ? "" : texQ(coef);
+    return { valTex: cTex + "\\sqrt{" + m + "}", aTex: texSurd(u, Q(-w.n, w.d), m), bTex: texSurd(u, w, m), val };
+  }
+  return null;
+}
+function safeCall(h, x) { try { const v = h(x); return typeof v === "number" ? v : NaN; } catch (e) { return NaN; } }
+// h(x)=0 の解(符号変化)を [xmin,xmax] で探す
+function findRoots(h, xmin, xmax, N = 4000) {
+  const roots = [];
+  const push = x => { if (!roots.some(r => Math.abs(r - x) < 1e-9 * (1 + Math.abs(x)))) roots.push(x); };
+  const dx = (xmax - xmin) / N;
+  let px = xmin, py = safeCall(h, px);
+  for (let i = 1; i <= N; i++) {
+    const x = xmin + dx * i, y = safeCall(h, x);
+    if (isFinite(py) && isFinite(y)) {
+      if (py === 0) push(px);
+      else if (py * y < 0) {
+        let lo = px, hi = x, flo = py;
+        for (let k = 0; k < 80; k++) {
+          const mid = (lo + hi) / 2, fm = safeCall(h, mid);
+          if (!isFinite(fm)) break;
+          if (flo * fm <= 0) hi = mid; else { lo = mid; flo = fm; }
+        }
+        const root = (lo + hi) / 2, fr = safeCall(h, root);
+        if (isFinite(fr) && Math.abs(fr) < 1e-6 * (1 + Math.max(Math.abs(py), Math.abs(y)))) push(root);
+      }
+    }
+    px = x; py = y;
+  }
+  if (py === 0) push(px);
+  return roots.sort((p, q) => p - q);
+}
+function simpson(f, a, b, n = 2000) {
+  if (n % 2) n++;
+  const hh = (b - a) / n;
+  let s = f(a) + f(b);
+  for (let i = 1; i < n; i++) s += f(a + i * hh) * (i % 2 ? 4 : 2);
+  return s * hh / 3;
+}
+function areaNumeric(h, a, b, interior) {
+  const pts = [a, ...interior, b];
+  let area = 0, signed = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    area += simpson(x => Math.abs(h(x)), pts[i], pts[i + 1]);
+    signed += simpson(h, pts[i], pts[i + 1]);
+  }
+  return { area, signed };
+}
+/* --- 交点座標の厳密表示(2次式の無理数解)と微分 --- */
+function quadSurd(co) { // 2次式(有理数係数)の解が無理数なら {u,w,m}: x = u ± w√m
+  if (!co || co.length !== 3) return null;
+  const A = co[2], B = co[1], C = co[0];
+  const D = qSub(qMul(B, B), qMul(Q(4, 1), qMul(A, C)));
+  if (D.n <= 0) return null;
+  const N = D.n * D.d;
+  let s = 1;
+  for (let t = Math.floor(Math.sqrt(N)); t >= 1; t--) { if (N % (t * t) === 0) { s = t; break; } }
+  const m = N / (s * s);
+  if (m <= 1) return null;
+  return { u: qDiv(Q(-B.n, B.d), qMul(Q(2, 1), A)), w: qDiv(Q(s, 2 * D.d), Q(Math.abs(A.n), A.d)), m };
+}
+function surdEvalPoly(co, u, w, m) { // 多項式を x=u+w√m で評価 → a+b√m
+  let pa = qZero(), pb = qZero();
+  const M = Q(m, 1);
+  for (let j = co.length - 1; j >= 0; j--) {
+    const na = qAdd(qMul(pa, u), qMul(qMul(pb, w), M));
+    const nb = qAdd(qMul(pa, w), qMul(pb, u));
+    pa = qAdd(na, co[j]); pb = nb;
+  }
+  return { a: pa, b: pb };
+}
+function lcm(a, b) { return a / gcd(a, b) * b; }
+function surdStr(a, b, m) { // a+b√m を文字列に
+  if (b.n === 0) return a.d === 1 ? String(a.n) : a.n + "/" + a.d;
+  const d = lcm(a.d, b.d), A = a.n * (d / a.d), B = b.n * (d / b.d), aB = Math.abs(B);
+  const sq = (aB === 1 ? "" : String(aB)) + "√" + m;
+  if (A === 0) return (B < 0 ? "-" : "") + sq + (d > 1 ? "/" + d : "");
+  const num = String(A) + (B < 0 ? "-" : "+") + sq;
+  return d > 1 ? "(" + num + ")/" + d : num;
+}
+// 交点 (x,y) の座標ラベルを作る関数を返す。h=f-g が2次式で解が無理数なら厳密、それ以外は分数/小数
+function makeLabeler(f, h) {
+  const ch = fitPoly(h), cf = fitPoly(f), sq = quadSurd(ch);
+  return (x, y) => {
+    if (sq) {
+      for (const sgn of [-1, 1]) {
+        const w = Q(sgn * sq.w.n, sq.w.d);
+        if (Math.abs(x - (qNum(sq.u) + qNum(w) * Math.sqrt(sq.m))) < 1e-6) {
+          const xs = surdStr(sq.u, w, sq.m);
+          let ys = fmtX(y);
+          if (cf) { const v = surdEvalPoly(cf, sq.u, w, sq.m); ys = surdStr(v.a, v.b, sq.m); }
+          return "(" + xs + ", " + ys + ")";
+        }
+      }
+    }
+    return "(" + fmtPiX(x) + ", " + fmtX(y) + ")";
+  };
+}
+// 点 x での微分係数。多項式なら分数で厳密、それ以外は数値微分。尖った点は不可
+function derivInfo(f, x) {
+  const dt = v => String(+v.toPrecision(5));
+  const y = safeCall(f, x);
+  if (!isFinite(y)) return { ok: false, msg: "この点では値が定まりません" };
+  const qx = qFromFloat(x, 2000, 1e-9);
+  const xTex = (xTexFormatter && xTexFormatter(x)) || (qx ? texQ(qx) : dt(x));
+  const co = fitPoly(f);
+  if (co) {
+    const dco = co.slice(1).map((c, j) => qMul(c, Q(j + 1, 1)));
+    if (!dco.length) dco.push(qZero());
+    if (qx) {
+      const m = qPolyEvalQ(dco, qx), yq = qPolyEvalQ(co, qx);
+      return { ok: true, m: qNum(m), mTex: texQ(m), y: qNum(yq), yTex: texQ(yq), xTex };
+    }
+    let m = polyEvalNum(dco, x);
+    if (Math.abs(m) < 1e-6) m = 0;
+    return { ok: true, m, mTex: m === 0 ? "0" : dt(m), y, yTex: dt(Math.abs(y) < 1e-12 ? 0 : y), xTex };
+  }
+  const h = 1e-5 * (1 + Math.abs(x));
+  const yl = safeCall(f, x - h), yr = safeCall(f, x + h);
+  if (!isFinite(yl) || !isFinite(yr)) return { ok: false, msg: "この点では微分できません(定義域の端など)" };
+  const sl = (y - yl) / h, sr = (yr - y) / h;
+  if (Math.abs(sl - sr) > 1e-3 * (1 + Math.abs(sl) + Math.abs(sr))) return { ok: false, msg: "この点では微分できません(とがった点)" };
+  let m = (yr - yl) / (2 * h);
+  if (Math.abs(m) < 1e-6) m = 0;
+  return { ok: true, m, mTex: m === 0 ? "0" : dt(m), y, yTex: dt(Math.abs(y) < 1e-12 ? 0 : y), xTex };
+}
+/* --- π表示・度表示(横軸・座標・微分の表記) --- */
+let xFormatter = null, xTexFormatter = null; // 画面側が設定。x を文字列にして返す(対象外なら null)
+function piParts(x) { return qFromFloat(x / Math.PI, 24, 1e-9); } // x が π の簡単な有理数倍なら Q
+function piText(q) { // 3π/2 の形
+  if (q.n === 0) return "0";
+  const an = Math.abs(q.n);
+  return (q.n < 0 ? "-" : "") + (an === 1 ? "π" : an + "π") + (q.d > 1 ? "/" + q.d : "");
+}
+function piTexQ(q) { // \frac{3\pi}{2} の形
+  if (q.n === 0) return "0";
+  const an = Math.abs(q.n), s = q.n < 0 ? "-" : "", num = an === 1 ? "\\pi" : an + "\\pi";
+  return q.d > 1 ? s + "\\frac{" + num + "}{" + q.d + "}" : s + num;
+}
+function degVal(x) { const d = x * 180 / Math.PI, r = Math.round(d); return Math.abs(d - r) < 1e-7 * (1 + Math.abs(d)) ? r : null; }
+function fmtPiX(x) { const s = xFormatter ? xFormatter(x) : null; return s !== null && s !== undefined ? s : fmtX(x); }
+/*REGION_END*/
 
 /* ============ グラフ ============ */
-const gc = $("graph"), gctx = gc.getContext("2d");
+const gc = $("graph");
+let gctx = gc.getContext("2d");
 let view = { xmin: -10, xmax: 10, ymin: -10, ymax: 10 };
-let fn = null;
+let fn = null, fn2 = null, region = null, info1 = null, info2 = null;
+let icpt = [], diffPt = null;
 
 function setupGraph() {
   const dpr = window.devicePixelRatio || 1;
@@ -380,6 +909,60 @@ function niceStep(range) {
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
 }
 function fmt(v) { return Math.abs(v) < 1e-12 ? "0" : String(+v.toPrecision(6)); }
+function fmtX(x) { // 分数で表せれば分数、なければ小数
+  const q = qFromFloat(x, 200, 1e-9);
+  if (q) return q.d > 1 ? q.n + "/" + q.d : String(q.n);
+  return String(+x.toPrecision(4));
+}
+function drawCurve(f, color, X, Y, W, H, asym) {
+  gctx.strokeStyle = color; gctx.lineWidth = 2.5; gctx.lineJoin = "round";
+  gctx.beginPath();
+  let pen = false, prevPy = 0, havePrev = false, xPrev = 0, yPrev = 0;
+  const jumps = [], span = view.ymax - view.ymin;
+  const steps = Math.ceil(W * 2);
+  for (let i = 0; i <= steps; i++) {
+    const x = view.xmin + (view.xmax - view.xmin) * i / steps;
+    const y = safeCall(f, x);
+    if (!isFinite(y)) { pen = false; havePrev = false; continue; }
+    // 符号が反転し、両側とも大きい値 → 漸近線(tanなど)
+    if (asym && havePrev && yPrev * y < 0 && Math.abs(yPrev) > 2 * span && Math.abs(y) > 2 * span) jumps.push(X((xPrev + x) / 2));
+    xPrev = x; yPrev = y; havePrev = true;
+    const px = X(x), py = Y(y);
+    if (Math.abs(py) > H * 50) { pen = false; continue; }
+    if (pen && Math.abs(py - prevPy) > H * 1.5) pen = false; // 不連続（漸近線など）
+    if (!pen) { gctx.moveTo(px, py); pen = true; } else gctx.lineTo(px, py);
+    prevPy = py;
+  }
+  gctx.stroke();
+  if (jumps.length) {
+    gctx.save(); gctx.setLineDash([6, 5]); gctx.strokeStyle = "#9aa5b8"; gctx.lineWidth = 1.3;
+    jumps.forEach(jx => { gctx.beginPath(); gctx.moveTo(jx, 0); gctx.lineTo(jx, H); gctx.stroke(); });
+    gctx.restore();
+  }
+}
+function drawShade(X, Y, W, H) {
+  const R = region;
+  if (!R || !R.ok || !fn || !fn2) return;
+  const n = Math.max(80, Math.ceil((R.b - R.a) / (view.xmax - view.xmin) * W * 2));
+  const clampY = py => Math.max(-H, Math.min(2 * H, py));
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const x = R.a + (R.b - R.a) * i / n, y1 = safeCall(fn, x), y2 = safeCall(fn2, x);
+    if (isFinite(y1) && isFinite(y2)) pts.push([x, y1, y2]);
+  }
+  if (pts.length < 2) return;
+  gctx.beginPath();
+  pts.forEach((p, i) => { const px = X(p[0]), py = clampY(Y(p[1])); if (i) gctx.lineTo(px, py); else gctx.moveTo(px, py); });
+  for (let i = pts.length - 1; i >= 0; i--) gctx.lineTo(X(pts[i][0]), clampY(Y(pts[i][2])));
+  gctx.closePath();
+  gctx.fillStyle = "rgba(46,160,90,0.30)"; gctx.fill();
+  gctx.save(); gctx.setLineDash([5, 4]); gctx.strokeStyle = "rgba(30,120,70,0.9)"; gctx.lineWidth = 1.5;
+  [R.a, R.b].forEach(x => {
+    const y1 = safeCall(fn, x), y2 = safeCall(fn2, x);
+    if (isFinite(y1) && isFinite(y2)) { gctx.beginPath(); gctx.moveTo(X(x), clampY(Y(y1))); gctx.lineTo(X(x), clampY(Y(y2))); gctx.stroke(); }
+  });
+  gctx.restore();
+}
 function drawGraph() {
   const r = gc.getBoundingClientRect(), W = r.width, H = r.height;
   const { xmin, xmax, ymin, ymax } = view;
@@ -387,11 +970,9 @@ function drawGraph() {
   const Y = y => H - (y - ymin) / (ymax - ymin) * H;
   gctx.fillStyle = "#fff"; gctx.fillRect(0, 0, W, H);
   gctx.font = "11px sans-serif";
-  const sx = niceStep(xmax - xmin), sy = niceStep(ymax - ymin);
+  const sy = niceStep(ymax - ymin), xt = xTicks(W);
   gctx.lineWidth = 1;
-  for (let x = Math.ceil(xmin / sx) * sx; x <= xmax; x += sx) {
-    gctx.strokeStyle = "#e6eaf2"; gctx.beginPath(); gctx.moveTo(X(x), 0); gctx.lineTo(X(x), H); gctx.stroke();
-  }
+  xt.forEach(t => { gctx.strokeStyle = "#e6eaf2"; gctx.beginPath(); gctx.moveTo(X(t.x), 0); gctx.lineTo(X(t.x), H); gctx.stroke(); });
   for (let y = Math.ceil(ymin / sy) * sy; y <= ymax; y += sy) {
     gctx.strokeStyle = "#e6eaf2"; gctx.beginPath(); gctx.moveTo(0, Y(y)); gctx.lineTo(W, Y(y)); gctx.stroke();
   }
@@ -400,33 +981,23 @@ function drawGraph() {
   const ax = Math.min(Math.max(X(0), 0), W), ay = Math.min(Math.max(Y(0), 0), H);
   gctx.beginPath(); gctx.moveTo(ax, 0); gctx.lineTo(ax, H); gctx.moveTo(0, ay); gctx.lineTo(W, ay); gctx.stroke();
   gctx.fillStyle = "#555";
-  for (let x = Math.ceil(xmin / sx) * sx; x <= xmax; x += sx) {
-    if (Math.abs(x) < sx / 1e3) continue;
-    gctx.textAlign = "center"; gctx.fillText(fmt(x), X(x), Math.min(ay + 13, H - 3));
-  }
+  xt.forEach(t => {
+    if (t.zero) return;
+    gctx.textAlign = "center"; gctx.fillText(t.label, X(t.x), Math.min(ay + 13, H - 3));
+  });
   for (let y = Math.ceil(ymin / sy) * sy; y <= ymax; y += sy) {
     if (Math.abs(y) < sy / 1e3) continue;
     gctx.textAlign = "left"; gctx.fillText(fmt(y), Math.min(ax + 4, W - 30), Y(y) - 2);
   }
   gctx.textAlign = "left"; gctx.fillText("0", Math.min(ax + 4, W - 10), Math.min(ay + 13, H - 3));
-  // 曲線
-  if (!fn) return;
-  gctx.strokeStyle = "#d62d2d"; gctx.lineWidth = 2.5; gctx.lineJoin = "round";
-  gctx.beginPath();
-  let pen = false, prevPy = 0;
-  const steps = Math.ceil(W * 2);
-  for (let i = 0; i <= steps; i++) {
-    const x = xmin + (xmax - xmin) * i / steps;
-    let y;
-    try { y = fn(x); } catch (e) { y = NaN; }
-    if (typeof y !== "number" || !isFinite(y)) { pen = false; continue; }
-    const px = X(x), py = Y(y);
-    if (Math.abs(py) > H * 50) { pen = false; continue; }
-    if (pen && Math.abs(py - prevPy) > H * 1.5) pen = false; // 不連続（漸近線など）
-    if (!pen) { gctx.moveTo(px, py); pen = true; } else gctx.lineTo(px, py);
-    prevPy = py;
-  }
-  gctx.stroke();
+  // 領域 → 曲線 → 交点
+  drawShade(X, Y, W, H);
+  const isTan = inf => !!(inf && inf.expr && /\btan\(/.test(inf.expr));
+  if (fn) drawCurve(fn, "#d62d2d", X, Y, W, H, isTan(info1));
+  if (fn2 && useG()) drawCurve(fn2, "#2457d6", X, Y, W, H, isTan(info2));
+  drawDots(X, Y, W, H);
+  drawDiffMark(X, Y, W, H);
+  drawAnnotations(X, Y);
 }
 function syncInputs() {
   $("xmin").value = +view.xmin.toPrecision(6); $("xmax").value = +view.xmax.toPrecision(6);
@@ -444,54 +1015,170 @@ function autoY() {
   const ys = [];
   for (let i = 0; i <= 800; i++) {
     const x = view.xmin + (view.xmax - view.xmin) * i / 800;
-    try { const y = fn(x); if (typeof y === "number" && isFinite(y)) ys.push(y); } catch (e) {}
+    [fn, (fn2 && useG()) ? fn2 : null].forEach(f => { if (f) { const y = safeCall(f, x); if (isFinite(y)) ys.push(y); } });
   }
   if (ys.length < 2) return;
   ys.sort((a, b) => a - b);
   let lo = ys[Math.floor(ys.length * 0.03)], hi = ys[Math.ceil(ys.length * 0.97) - 1];
   if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
-  const pad = (hi - lo) * 0.15;
-  view.ymin = lo - pad; view.ymax = hi + pad;
-  syncInputs(); drawGraph();
+  const p = (hi - lo) * 0.15;
+  view.ymin = lo - p; view.ymax = hi + p;
+  syncInputs(); refreshAll();
 }
+
+/* ============ 式のコンパイル ============ */
+function compileLatex(src) {
+  src = normalizeInput(src);
+  const expr = latexToExpr(src);
+  const code = math.parse(expr).compile();
+  const test = code.evaluate({ x: 1 });
+  if (typeof test !== "number" && !(test && (typeof test.toNumber === "function" || typeof test.re === "number"))) {
+    throw new Error("実数の関数として評価できません");
+  }
+  const f = x => { const v = code.evaluate({ x }); return typeof v === "number" ? v : (v && typeof v.toNumber === "function" ? v.toNumber() : NaN); };
+  return { f, expr, rhs: rhsOf(src) };
+}
+
 function drawFromInput() {
-  const src = $("latex").value.trim();
-  $("graphMsg").className = "msg";
-  if (!src) { $("graphMsg").textContent = "式を入力してください"; return; }
-  try {
-    const expr = latexToExpr(src);
-    const node = math.parse(expr);
-    const code = node.compile();
-    const test = code.evaluate({ x: 1 });
-    if (test && typeof test === "object" && !(typeof test === "number")) {
-      if (typeof test.re === "undefined" && typeof test.toNumber !== "function") throw new Error("実数の関数として評価できません");
-    }
-    fn = x => { const v = code.evaluate({ x }); return typeof v === "number" ? v : (v && typeof v.toNumber === "function" ? v.toNumber() : NaN); };
-    $("exprInfo").textContent = "解釈した式: y = " + expr;
-    $("graphMsg").textContent = "";
-    if (!readInputs()) return;
-    drawGraph();
-  } catch (e) {
-    fn = null; drawGraph();
-    $("exprInfo").textContent = "";
-    $("graphMsg").textContent = "グラフにできません: " + e.message; $("graphMsg").className = "msg err";
+  $("graphMsg").className = "msg"; $("graphMsg").textContent = "";
+  fn = null; fn2 = null; region = null; info1 = null; info2 = null;
+  icpt = []; diffPt = null; shownDots.clear(); updateDiffUI();
+  const infoLines = [];
+  const src1 = $("latex").value.trim();
+  if (!src1) { $("graphMsg").textContent = "式1を入力してください"; drawGraph(); refreshRegionUI(); return; }
+  try { info1 = compileLatex(src1); fn = info1.f; infoLines.push("式1: y = " + info1.expr); }
+  catch (e) { $("graphMsg").textContent = "式1がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; $("exprInfo").textContent = ""; drawGraph(); refreshRegionUI(); return; }
+  if (regionOn()) {
+    if (useG()) {
+      const src2 = $("latex2").value.trim();
+      if (!src2) { $("graphMsg").textContent = "式2を入力してください(式1だけ表示中)"; $("graphMsg").className = "msg err"; }
+      else {
+        try { info2 = compileLatex(src2); fn2 = info2.f; infoLines.push("式2: y = " + info2.expr); }
+        catch (e) { $("graphMsg").textContent = "式2がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; }
+      }
+    } else { fn2 = () => 0; info2 = { rhs: "0" }; }
+  }
+  $("exprInfo").textContent = "解釈した式 → " + infoLines.join(" / ");
+  const trigNow = hasTrig(); // 三角関数を初めて描くときは、範囲が初期値のままなら -2π〜2π に合わせる
+  if (trigNow && !lastTrig && axisKind() !== "num" && isInitialView()) { view = defaultView(); syncInputs(); }
+  lastTrig = trigNow;
+  if (!readInputs()) return;
+  refreshAll();
+}
+function refreshAll() { computeRegion(); computeIcpt(); drawGraph(); renderResult(); }
+function refreshRegionUI() { computeRegion(); computeIcpt(); renderResult(); }
+
+/* ============ 積分領域 ============ */
+function ivMode() { return document.querySelector("input[name=ivm]:checked").value; }
+function setIvm(v) {
+  document.querySelector("input[name=ivm][value=" + v + "]").checked = true; updateIvUI();
+}
+function updateIvUI() {
+  const v = ivMode();
+  $("ivB").hidden = v !== "B"; $("ivC").hidden = v !== "C";
+}
+function evalNum(s) { try { const v = math.evaluate(String(s).replace(/π/g, "pi")); return typeof v === "number" ? v : NaN; } catch (e) { return NaN; } }
+function renderInter(inter) {
+  const keepL = parseInt($("selL").value, 10), keepR = parseInt($("selR").value, 10);
+  const opts = inter.map((p, i) => "<option value=\"" + i + "\">" + (i + 1) + ": x=" + fmtPiX(p.x) + "</option>").join("");
+  $("selL").innerHTML = opts; $("selR").innerHTML = opts;
+  if (inter.length) {
+    $("selL").value = String(keepL >= 0 && keepL < inter.length ? keepL : 0);
+    $("selR").value = String(keepR >= 0 && keepR < inter.length ? keepR : Math.min(1, inter.length - 1));
+  }
+  $("interList").textContent = inter.length
+    ? "交点: " + inter.length + "個" + ($("showCoords").checked
+        ? " … " + inter.map((p, i) => "交点" + (i + 1) + ": " + p.label).join("   ")
+        : "(座標は「座標を表示」か、点のタップで確認できます)")
+    : (regionOn() ? "表示範囲内に交点がありません" : "");
+}
+function computeRegion() {
+  region = null;
+  $("regionMsg").textContent = ""; $("regionMsg").className = "msg";
+  const msg = (t, err) => { $("regionMsg").textContent = t; $("regionMsg").className = "msg" + (err ? " err" : ""); };
+  if (!regionOn() || !fn || !fn2) { renderInter([]); return; }
+  const f = fn, g = fn2, h = x => f(x) - g(x);
+  const lab = makeLabeler(f, h);
+  const inter = findRoots(h, ...rootRange()).map(x => { const y = safeCall(f, x); return { x, y, label: lab(x, y) }; });
+  renderInter(inter);
+  let ivm = ivMode(), a, b;
+  if (ivm === "A") {
+    if (inter.length === 2) { a = inter[0].x; b = inter[1].x; }
+    else if (inter.length > 2) { setIvm("B"); ivm = "B"; msg("交点が3つ以上あります。B案で左端・右端を選んでください"); }
+    else { setIvm("C"); ivm = "C"; msg("交点が2つ未満です。C案で区間を入力してください"); }
+  }
+  if (ivm === "B") {
+    if (inter.length < 2) { region = { ok: false, inter }; msg("交点が2つ未満です。C案で区間を入力してください", true); return; }
+    let l = parseInt($("selL").value, 10), r = parseInt($("selR").value, 10);
+    if (l === r) { region = { ok: false, inter }; msg("左端と右端に別の交点を選んでください", true); return; }
+    if (l > r) { const t = l; l = r; r = t; }
+    a = inter[l].x; b = inter[r].x;
+  }
+  if (ivm === "C") {
+    a = evalNum($("ivA").value); b = evalNum($("ivBv").value);
+    if (!isFinite(a) || !isFinite(b)) { region = { ok: false, inter }; if (!$("regionMsg").textContent) msg("a と b を入力して「反映」を押してください"); return; }
+    if (!(a < b)) { region = { ok: false, inter }; msg("a < b になるように入力してください", true); return; }
+  }
+  updateIvUI();
+  const interior = findRoots(h, a, b).filter(r => r > a + 1e-9 * (1 + Math.abs(a)) && r < b - 1e-9 * (1 + Math.abs(b)));
+  const num = areaNumeric(h, a, b, interior);
+  if (!isFinite(num.area)) { region = { ok: false, inter }; msg("この区間では値が定まりません(不連続・発散)", true); return; }
+  const ex = exactArea(h, a, b, interior, num.area);
+  region = { ok: true, a, b, interior, area: num.area, exact: ex, fTop: h((a + b) / 2) >= 0, inter };
+}
+function decTex(v) { return String(+v.toPrecision(5)); }
+function renderResult() {
+  const box = $("result");
+  if (!regionOn() || !region || !region.ok || !info1 || !info2) { box.textContent = ""; return; }
+  const R = region, ex = R.exact;
+  const texX = v => (xTexFormatter && xTexFormatter(v)) || decTex(v);
+  const aT = ex ? ex.aTex : texX(R.a), bT = ex ? ex.bTex : texX(R.b);
+  const F = info1.rhs, G = info2.rhs;
+  let body;
+  if (R.interior.length > 0) {
+    body = "\\left|" + (G === "0" ? "\\left(" + F + "\\right)" : "\\left(" + F + "\\right)-\\left(" + G + "\\right)") + "\\right|";
+  } else {
+    const top = R.fTop ? F : G, bot = R.fTop ? G : F;
+    if (bot === "0") body = "\\left(" + top + "\\right)";
+    else if (top === "0") body = "-\\left(" + bot + "\\right)";
+    else body = "\\left\\{\\left(" + top + "\\right)-\\left(" + bot + "\\right)\\right\\}";
+  }
+  let tex = "S=\\int_{" + aT + "}^{" + bT + "}" + body + "\\,dx";
+  tex += ex ? "=" + ex.valTex + "\\approx " + decTex(ex.val) : "\\approx " + decTex(R.area);
+  try { katex.render(tex, box, { displayMode: true, throwOnError: true, strict: "ignore" }); }
+  catch (e) { box.textContent = "S ≈ " + decTex(R.area); }
+  if (!ex) {
+    $("regionMsg").textContent = "厳密な分数・根号の値は、多項式(2次の無理数解は根号)のときだけ出せます。この式は小数で表示しています";
+    $("regionMsg").className = "msg";
+  } else if (R.interior.length > 0) {
+    $("regionMsg").textContent = "区間の途中で2つのグラフが交わるため、絶対値で面積を出しています";
+    $("regionMsg").className = "msg";
   }
 }
+
+/* ============ イベント ============ */
 $("btnGraph").onclick = drawFromInput;
-$("btnApplyRange").onclick = () => { if (readInputs()) { $("graphMsg").textContent = ""; drawGraph(); } };
+$("regionMode").addEventListener("change", () => { updateModeUI(); drawFromInput(); });
+$("regionType").addEventListener("change", () => { updateModeUI(); drawFromInput(); });
+document.querySelectorAll("input[name=ivm]").forEach(r => r.addEventListener("change", () => { updateIvUI(); refreshAll(); }));
+$("selL").addEventListener("change", refreshAll);
+$("selR").addEventListener("change", refreshAll);
+$("btnIvApply").onclick = refreshAll;
+["ivA", "ivBv"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter") refreshAll(); }));
+$("btnApplyRange").onclick = () => { if (readInputs()) { $("graphMsg").textContent = ""; refreshAll(); } };
 $("btnAuto").onclick = () => { if (readInputs()) autoY(); };
-$("btnReset").onclick = () => { view = { xmin: -10, xmax: 10, ymin: -10, ymax: 10 }; syncInputs(); drawGraph(); };
+$("btnReset").onclick = () => { view = defaultView(); syncInputs(); refreshAll(); };
 function zoom(f) {
   const cx = (view.xmin + view.xmax) / 2, cy = (view.ymin + view.ymax) / 2;
   const hx = (view.xmax - view.xmin) / 2 * f, hy = (view.ymax - view.ymin) / 2 * f;
-  view = { xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy }; syncInputs(); drawGraph();
+  view = { xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy }; syncInputs(); refreshAll();
 }
 $("btnZoomIn").onclick = () => zoom(0.7);
 $("btnZoomOut").onclick = () => zoom(1 / 0.7);
 
 // ドラッグで移動
 let drag = null;
-gc.addEventListener("pointerdown", e => { gc.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, v: { ...view } }; });
+gc.addEventListener("pointerdown", e => { if (!panAllowed(e)) return; gc.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, v: { ...view } }; });
 gc.addEventListener("pointermove", e => {
   if (!drag) return;
   const r = gc.getBoundingClientRect();
@@ -500,12 +1187,425 @@ gc.addEventListener("pointermove", e => {
   view = { xmin: drag.v.xmin - dx, xmax: drag.v.xmax - dx, ymin: drag.v.ymin + dy, ymax: drag.v.ymax + dy };
   syncInputs(); drawGraph();
 });
-const endDrag = () => { drag = null; };
+const endDrag = () => { if (drag) { drag = null; refreshAll(); } };
 gc.addEventListener("pointerup", endDrag); gc.addEventListener("pointercancel", endDrag);
 gc.addEventListener("wheel", e => { e.preventDefault(); zoom(e.deltaY > 0 ? 1.15 : 0.87); }, { passive: false });
 
+/* ============ 横軸の表示(数値 / π / 度) ============ */
+const trigRe = names => new RegExp("\\b(?:" + names + ")(?![a-zA-Z])");
+function exprText() { return ((info1 && info1.expr) || "") + " " + ((useG() && info2 && info2.expr) || ""); }
+function hasTrig() { return trigRe("sin|cos|tan").test(exprText()); }
+function hasTan() { return trigRe("tan").test(exprText()); }
+function axisKind() {
+  const m = $("axisMode").value;
+  if (m === "pi" || m === "deg") return m;
+  return m === "auto" && hasTrig() ? "pi" : "num";
+}
+let lastTrig = false;
+function defaultView() {
+  if (axisKind() !== "num" && hasTrig()) { const a = hasTan() ? 4 : 2; return { xmin: -2 * Math.PI, xmax: 2 * Math.PI, ymin: -a, ymax: a }; }
+  return { xmin: -10, xmax: 10, ymin: -10, ymax: 10 };
+}
+function isInitialView() { return view.xmin === -10 && view.xmax === 10 && view.ymin === -10 && view.ymax === 10; }
+function piStep(W) { // 目盛りの間隔(込み合うときは倍々にして間引く)
+  const D = +$("axisStep").value || 2, base = Math.PI / D, ppu = W / (view.xmax - view.xmin);
+  const mults = D === 6 ? [1, 2, 3, 6, 12, 24, 48, 96, 192, 384] : [1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
+  let mult = mults[mults.length - 1];
+  for (const m of mults) { if (base * m * ppu >= 28) { mult = m; break; } }
+  return { D, mult, step: base * mult };
+}
+function xTicks(W) {
+  const kind = axisKind(), out = [];
+  if (kind === "num") {
+    const sx = niceStep(view.xmax - view.xmin);
+    for (let x = Math.ceil(view.xmin / sx) * sx; x <= view.xmax; x += sx) out.push({ x, label: fmt(x), zero: Math.abs(x) < sx / 1e3 });
+    return out;
+  }
+  const { D, mult, step } = piStep(W);
+  const k0 = Math.ceil(view.xmin / step - 1e-9), k1 = Math.floor(view.xmax / step + 1e-9);
+  if (k1 - k0 > 400) return out;
+  for (let k = k0; k <= k1; k++) {
+    const units = k * mult; // π/D の個数
+    out.push({ x: k * step, label: kind === "pi" ? piText(Q(units, D)) : (units * 180 / D) + "°", zero: k === 0 });
+  }
+  return out;
+}
+xFormatter = x => {
+  const k = axisKind();
+  if (k === "pi") { const q = piParts(x); return q ? piText(q) : null; }
+  if (k === "deg") { const d = degVal(x); return d === null ? null : (d === 0 ? "0" : d + "°"); }
+  return null;
+};
+xTexFormatter = x => {
+  const k = axisKind();
+  if (k === "pi") { const q = piParts(x); return q ? piTexQ(q) : null; }
+  if (k === "deg") { const d = degVal(x); return d === null ? null : (d === 0 ? "0" : d + "^{\\circ}"); }
+  return null;
+};
+["axisMode", "axisStep"].forEach(id => $(id).addEventListener("change", refreshAll));
+
+/* ============ 交点の点・座標表示 / 微分モード ============ */
+const shownDots = new Set();
+const dotKey = (x, y) => x.toFixed(4) + "," + y.toFixed(4);
+// 表示範囲の端ぴったりにある交点(sin x の ±2π など)も拾うため、少しだけ広げて探す
+function rootRange() { const m = (view.xmax - view.xmin) * 0.005; return [view.xmin - m, view.xmax + m]; }
+function computeIcpt() { // x切片・y切片(各曲線)
+  icpt = [];
+  const curves = [];
+  if (fn) curves.push({ f: fn, col: "#d62d2d" });
+  if (fn2 && useG()) curves.push({ f: fn2, col: "#2457d6" });
+  const near = (a, b) => Math.abs(a - b) < 1e-7 * (1 + Math.abs(a));
+  for (const c of curves) {
+    const lab = makeLabeler(c.f, c.f);
+    const dnum = x => { const h = 1e-6 * (1 + Math.abs(x)); return (safeCall(c.f, x + h) - safeCall(c.f, x - h)) / (2 * h); };
+    const [r0, r1] = rootRange();
+    const xs = findRoots(c.f, r0, r1);
+    if (xs.length <= 60) {
+      findRoots(dnum, r0, r1, 2000).forEach(xc => { // x軸に接する点
+        const y = safeCall(c.f, xc);
+        if (isFinite(y) && Math.abs(y) < 1e-9 && !xs.some(v => near(v, xc))) xs.push(xc);
+      });
+      xs.forEach(x => icpt.push({ x, y: 0, kind: "x", col: c.col, label: lab(x, 0) }));
+    }
+    if (view.xmin <= 0 && 0 <= view.xmax) {
+      const y0 = safeCall(c.f, 0);
+      if (isFinite(y0) && Math.abs(y0) > 1e-12) icpt.push({ x: 0, y: y0, kind: "y", col: c.col, label: lab(0, y0) });
+    }
+  }
+}
+function visibleDots() {
+  const out = [];
+  const add = p => { if (!out.some(q => Math.abs(q.x - p.x) < 1e-7 * (1 + Math.abs(p.x)) && Math.abs(q.y - p.y) < 1e-7 * (1 + Math.abs(p.y)))) out.push(p); };
+  if (regionOn() && region && region.inter) region.inter.forEach(p => add({ x: p.x, y: p.y, label: p.label, col: "#111" }));
+  if (fn) icpt.forEach(p => { if ((p.kind === "x" && $("showXi").checked) || (p.kind === "y" && $("showYi").checked)) add(p); });
+  return out;
+}
+function drawDots(X, Y, W, H) {
+  const all = $("showCoords").checked;
+  visibleDots().forEach(p => {
+    const px = X(p.x), py = Y(p.y);
+    if (px < -5 || px > W + 5 || py < -5 || py > H + 5) return;
+    gctx.beginPath(); gctx.arc(px, py, 5, 0, Math.PI * 2);
+    gctx.fillStyle = p.col; gctx.fill(); gctx.lineWidth = 2; gctx.strokeStyle = "#fff"; gctx.stroke();
+    if (all || shownDots.has(dotKey(p.x, p.y))) {
+      gctx.font = "12px sans-serif"; gctx.textAlign = "left"; gctx.textBaseline = "alphabetic";
+      const w = gctx.measureText(p.label).width, lx = Math.min(px + 8, W - w - 3), ly = Math.max(py - 8, 14);
+      gctx.fillStyle = "rgba(255,255,255,0.8)"; gctx.fillRect(lx - 2, ly - 12, w + 4, 16);
+      gctx.fillStyle = "#111"; gctx.fillText(p.label, lx, ly);
+    }
+  });
+}
+function drawDiffMark(X, Y, W, H) {
+  if (!diffPt || !diffPt.ok) return;
+  if ($("showTan").checked && isFinite(diffPt.m)) {
+    gctx.save(); gctx.strokeStyle = "#e67e22"; gctx.lineWidth = 2.5; gctx.beginPath();
+    gctx.moveTo(0, Y(diffPt.y + diffPt.m * (view.xmin - diffPt.x)));
+    gctx.lineTo(W, Y(diffPt.y + diffPt.m * (view.xmax - diffPt.x)));
+    gctx.stroke(); gctx.restore();
+  }
+  gctx.beginPath(); gctx.arc(X(diffPt.x), Y(diffPt.y), 6, 0, Math.PI * 2);
+  gctx.fillStyle = "#e67e22"; gctx.fill(); gctx.lineWidth = 2; gctx.strokeStyle = "#fff"; gctx.stroke();
+}
+function updateDiffUI() {
+  const arrow = $("diffArrow"), info = $("diffInfo");
+  $("diffPanel").hidden = gmode !== "diff";
+  if (!diffPt || !diffPt.ok) {
+    arrow.textContent = "—"; arrow.style.color = "#999";
+    info.textContent = diffPt ? diffPt.msg : "グラフ上をタップしてください";
+    return;
+  }
+  const m = diffPt.m;
+  if (m > 0) { arrow.textContent = "↗"; arrow.style.color = "#d62d2d"; }
+  else if (m < 0) { arrow.textContent = "↘"; arrow.style.color = "#2457d6"; }
+  else { arrow.textContent = "0"; arrow.style.color = "#555"; }
+  const name = diffPt.n === 2 ? "g" : "f";
+  const tex = name + "'\\left(" + diffPt.xTex + "\\right)=" + diffPt.mTex + "\\ \\ \\left(y=" + diffPt.yTex + "\\right)";
+  try { katex.render(tex, info, { throwOnError: true, strict: "ignore" }); } catch (e) { info.textContent = name + "'(x) = " + diffPt.mTex; }
+}
+function diffFail(msg) { diffPt = { ok: false, msg }; updateDiffUI(); drawGraph(); }
+function diffTap(px, py) {
+  const cands = [];
+  if (fn) cands.push({ f: fn, n: 1, col: "#d62d2d" });
+  if (fn2 && useG()) cands.push({ f: fn2, n: 2, col: "#2457d6" });
+  if (!cands.length) { diffFail("先にグラフを描いてください"); return; }
+  const d = px2data(px, py);
+  let best = null;
+  cands.forEach(c => {
+    const y = safeCall(c.f, d.x);
+    if (!isFinite(y)) return;
+    const dist = Math.abs(data2px(d.x, y).y - py);
+    if (!best || dist < best.dist) best = { ...c, dist };
+  });
+  if (!best || best.dist > 45) { diffFail("グラフの近くをタップしてください"); return; }
+  const f = best.f;
+  const dnum = x => { const h = 1e-6 * (1 + Math.abs(x)); return (safeCall(f, x + h) - safeCall(f, x - h)) / (2 * h); };
+  const cx = findRoots(dnum, view.xmin, view.xmax, 2000); // 傾き0(頂点など)
+  if (region && region.inter) region.inter.forEach(p => cx.push(p.x));
+  icpt.forEach(p => { if (p.col === best.col) cx.push(p.x); });
+  let x = null, bd = 10;
+  cx.forEach(c => { const dd = Math.abs(data2px(c, 0).x - px); if (dd < bd) { bd = dd; x = c; } });
+  if (x === null) {
+    if (axisKind() !== "num") { // π表示・度表示ではπ/12(15°)刻みに丸める(π/6・π/4・π/3・π/2を指定できる)
+      const ppu = gc.getBoundingClientRect().width / (view.xmax - view.xmin);
+      let ts = Math.PI / 12;
+      while (ts * ppu > 28 && ts > 1e-6) ts /= 2;
+      x = Math.round(d.x / ts) * ts;
+    } else { // 吸着しないときは目盛りの1/10に丸める
+      const step = niceStep(view.xmax - view.xmin) / 10;
+      x = +(Math.round(d.x / step) * step).toFixed(10);
+    }
+  }
+  const info = derivInfo(f, x);
+  diffPt = info.ok ? { ...info, x, n: best.n } : info;
+  updateDiffUI(); drawGraph();
+}
+function dotTap(px, py) {
+  let hit = null, bd = 16;
+  visibleDots().forEach(p => {
+    const q = data2px(p.x, p.y), dd = Math.hypot(q.x - px, q.y - py);
+    if (dd < bd) { bd = dd; hit = p; }
+  });
+  if (!hit) return;
+  const k = dotKey(hit.x, hit.y);
+  if (shownDots.has(k)) shownDots.delete(k); else shownDots.add(k);
+  drawGraph();
+}
+let tapStart = null;
+gc.addEventListener("pointerdown", e => {
+  const r = gc.getBoundingClientRect();
+  tapStart = { x: e.clientX - r.left, y: e.clientY - r.top, id: e.pointerId };
+});
+gc.addEventListener("pointerup", e => {
+  if (!tapStart || tapStart.id !== e.pointerId) return;
+  const r = gc.getBoundingClientRect(), s = tapStart; tapStart = null;
+  const px = e.clientX - r.left, py = e.clientY - r.top;
+  if (Math.hypot(px - s.x, py - s.y) > 6) return; // ドラッグはタップではない
+  if (gmode === "diff") diffTap(px, py);
+  else if (gmode === "move") dotTap(px, py);
+});
+gc.addEventListener("pointercancel", () => { tapStart = null; });
+["showXi", "showYi", "showTan"].forEach(id => $(id).addEventListener("change", drawGraph));
+$("showCoords").addEventListener("change", () => { if (region && region.inter) renderInter(region.inter); drawGraph(); });
+$("diffClear").onclick = () => { diffPt = null; updateDiffUI(); drawGraph(); };
+// 浮かせた微分パネルをドラッグで動かす(ボタン・チェックは通常どおり操作できる)
+(function () {
+  const p = $("diffPanel"), wrap = $("gwrap");
+  let st = null;
+  p.addEventListener("pointerdown", e => {
+    if (e.target.closest && e.target.closest("button,input,label,select")) return;
+    const pr = p.getBoundingClientRect();
+    st = { id: e.pointerId, dx: e.clientX - pr.left, dy: e.clientY - pr.top };
+    p.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  p.addEventListener("pointermove", e => {
+    if (!st || e.pointerId !== st.id) return;
+    const wr = wrap.getBoundingClientRect(), pr = p.getBoundingClientRect();
+    const l = Math.max(0, Math.min(wr.width - pr.width, e.clientX - wr.left - st.dx));
+    const t = Math.max(0, Math.min(wr.height - pr.height, e.clientY - wr.top - st.dy));
+    p.style.left = l + "px"; p.style.top = t + "px"; p.style.right = "auto";
+  });
+  const end = e => { if (st && e.pointerId === st.id) st = null; };
+  p.addEventListener("pointerup", end); p.addEventListener("pointercancel", end);
+})();
+
+/* ============ グラフへの書き込み(座標に固定。移動・拡大縮小に追従) ============ */
+let gmode = "move", annots = [], annHistory = [], annColor = "#111111", annW = 4, annSize = 18;
+let annCur = null, textDrag = null, erasing = null, drawQ = false;
+const HINTS = {
+  move: "ドラッグで移動/交点の点をタップで座標を表示",
+  diff: "曲線の近くをタップで微分を表示(頂点・交点に吸着)",
+  pen: "ペンで書き込み(グラフと一緒に動きます)",
+  text: "タップで文字を追加/文字をタップで編集・ドラッグで移動(改行は \\n)",
+  erase: "消したい書き込みをなぞると消えます"
+};
+function panAllowed(e) { return gmode === "move" || gmode === "diff" || ($("penOnly").checked && e.pointerType === "touch"); }
+function setGmode(m) {
+  gmode = m;
+  [["move", "gmMove"], ["diff", "gmDiff"], ["pen", "gmPen"], ["text", "gmText"], ["erase", "gmErase"]].forEach(([k, id]) => $(id).classList.toggle("on", k === m));
+  $("annHint").textContent = HINTS[m];
+  $("annOpts").hidden = !(m === "pen" || m === "text" || m === "erase"); // 色・太さは書き込みモードのときだけ
+  updateDiffUI();
+}
+function scheduleDraw() { if (drawQ) return; drawQ = true; requestAnimationFrame(() => { drawQ = false; drawGraph(); }); }
+function snapAnn() { annHistory.push(JSON.stringify(annots)); if (annHistory.length > 60) annHistory.shift(); }
+function px2data(px, py) {
+  const r = gc.getBoundingClientRect();
+  return { x: view.xmin + px / r.width * (view.xmax - view.xmin), y: view.ymax - py / r.height * (view.ymax - view.ymin) };
+}
+function data2px(x, y) {
+  const r = gc.getBoundingClientRect();
+  return { x: (x - view.xmin) / (view.xmax - view.xmin) * r.width, y: (view.ymax - y) / (view.ymax - view.ymin) * r.height };
+}
+function textLayout(a) {
+  gctx.font = a.s + "px sans-serif";
+  const lines = a.tx.split("\n"), lh = a.s * 1.25;
+  let w = 0; lines.forEach(l => { w = Math.max(w, gctx.measureText(l).width); });
+  return { lines, lh, w };
+}
+function drawAnnotations(X, Y) {
+  gctx.save();
+  gctx.lineCap = "round"; gctx.lineJoin = "round"; gctx.setLineDash([]);
+  for (const a of annots) {
+    if (a.t === "s") {
+      gctx.strokeStyle = a.c; gctx.lineWidth = a.w; gctx.beginPath();
+      a.p.forEach((q, i) => { const px = X(q[0]), py = Y(q[1]); if (i) gctx.lineTo(px, py); else gctx.moveTo(px, py); });
+      if (a.p.length === 1) gctx.lineTo(X(a.p[0][0]) + 0.01, Y(a.p[0][1]));
+      gctx.stroke();
+    } else {
+      const L = textLayout(a), px = X(a.x), py = Y(a.y);
+      gctx.fillStyle = "rgba(255,255,255,0.78)"; gctx.fillRect(px - 3, py - 2, L.w + 6, L.lines.length * L.lh + 4);
+      gctx.fillStyle = a.c; gctx.textAlign = "left"; gctx.textBaseline = "top";
+      L.lines.forEach((l, i) => gctx.fillText(l, px, py + i * L.lh));
+    }
+  }
+  gctx.restore();
+}
+function segDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+  let t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+function hitAnn(a, px, py) {
+  if (a.t === "t") {
+    const p = data2px(a.x, a.y), L = textLayout(a);
+    return px >= p.x - 3 && px <= p.x + L.w + 3 && py >= p.y - 2 && py <= p.y + L.lines.length * L.lh + 2;
+  }
+  const R = 14, pts = a.p.map(q => data2px(q[0], q[1]));
+  if (pts.length === 1) return Math.hypot(pts[0].x - px, pts[0].y - py) < R;
+  for (let i = 1; i < pts.length; i++) if (segDist(px, py, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y) < R) return true;
+  return false;
+}
+function hitText(px, py) {
+  for (let i = annots.length - 1; i >= 0; i--) if (annots[i].t === "t" && hitAnn(annots[i], px, py)) return annots[i];
+  return null;
+}
+function eraseAt(px, py) {
+  const keep = annots.filter(a => !hitAnn(a, px, py));
+  if (keep.length !== annots.length) {
+    if (!erasing.snap) { snapAnn(); erasing.snap = true; }
+    annots = keep; scheduleDraw();
+  }
+}
+function addTextAt(px, py) {
+  const t = prompt("書き込む文字を入力してください(改行は \\n)");
+  if (t === null || !t.trim()) return;
+  const d = px2data(px, py);
+  snapAnn();
+  annots.push({ t: "t", x: d.x, y: d.y, s: annSize, c: annColor, tx: t.replace(/\\n/g, "\n") });
+  drawGraph();
+}
+gc.addEventListener("pointerdown", e => {
+  if (panAllowed(e)) return;
+  e.preventDefault(); gc.setPointerCapture(e.pointerId);
+  const r = gc.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  if (gmode === "pen") {
+    snapAnn();
+    const d = px2data(px, py);
+    annCur = { t: "s", c: annColor, w: annW, p: [[d.x, d.y]], id: e.pointerId };
+    annots.push(annCur);
+    gctx.save(); gctx.fillStyle = annCur.c; gctx.beginPath(); gctx.arc(px, py, annW / 2, 0, Math.PI * 2); gctx.fill(); gctx.restore();
+  } else if (gmode === "erase") {
+    erasing = { id: e.pointerId, snap: false }; eraseAt(px, py);
+  } else if (gmode === "text") {
+    textDrag = { a: hitText(px, py), id: e.pointerId, sx: px, sy: py, moved: false, snap: false };
+    if (textDrag.a) { textDrag.ox = textDrag.a.x; textDrag.oy = textDrag.a.y; }
+  }
+});
+gc.addEventListener("pointermove", e => {
+  const r = gc.getBoundingClientRect();
+  if (annCur && e.pointerId === annCur.id) {
+    e.preventDefault();
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of (evs.length ? evs : [e])) {
+      const last = annCur.p[annCur.p.length - 1], lp = data2px(last[0], last[1]);
+      const px = ev.clientX - r.left, py = ev.clientY - r.top;
+      const d = px2data(px, py); annCur.p.push([d.x, d.y]);
+      gctx.save(); gctx.strokeStyle = annCur.c; gctx.lineWidth = annCur.w; gctx.lineCap = "round";
+      gctx.beginPath(); gctx.moveTo(lp.x, lp.y); gctx.lineTo(px, py); gctx.stroke(); gctx.restore();
+    }
+  } else if (erasing && e.pointerId === erasing.id) {
+    eraseAt(e.clientX - r.left, e.clientY - r.top);
+  } else if (textDrag && e.pointerId === textDrag.id && textDrag.a) {
+    const px = e.clientX - r.left, py = e.clientY - r.top;
+    if (!textDrag.moved && Math.abs(px - textDrag.sx) + Math.abs(py - textDrag.sy) < 5) return;
+    if (!textDrag.snap) { annots.forEach(a => { if (a === textDrag.a) { a.x = textDrag.ox; a.y = textDrag.oy; } }); snapAnn(); textDrag.snap = true; }
+    textDrag.moved = true;
+    textDrag.a.x = textDrag.ox + (px - textDrag.sx) / r.width * (view.xmax - view.xmin);
+    textDrag.a.y = textDrag.oy - (py - textDrag.sy) / r.height * (view.ymax - view.ymin);
+    scheduleDraw();
+  }
+});
+function endAnn(e) {
+  if (annCur && e.pointerId === annCur.id) { annCur = null; drawGraph(); return; }
+  if (erasing && e.pointerId === erasing.id) { erasing = null; return; }
+  if (textDrag && e.pointerId === textDrag.id) {
+    const td = textDrag; textDrag = null;
+    if (td.moved) { drawGraph(); return; }
+    if (e.type === "pointercancel") return;
+    if (td.a) {
+      const t = prompt("文字を編集してください(空にすると削除)", td.a.tx.replace(/\n/g, "\\n"));
+      if (t === null) return;
+      snapAnn();
+      if (!t.trim()) annots = annots.filter(a => a !== td.a); else td.a.tx = t.replace(/\\n/g, "\n");
+      drawGraph();
+    } else addTextAt(td.sx, td.sy);
+  }
+}
+gc.addEventListener("pointerup", endAnn);
+gc.addEventListener("pointercancel", endAnn);
+
+$("gmMove").onclick = () => setGmode("move");
+$("gmDiff").onclick = () => setGmode("diff");
+$("gmPen").onclick = () => setGmode("pen");
+$("gmText").onclick = () => setGmode("text");
+$("gmErase").onclick = () => setGmode("erase");
+document.querySelectorAll(".col").forEach(b => b.onclick = () => {
+  annColor = b.dataset.c;
+  document.querySelectorAll(".col").forEach(x => x.classList.toggle("on", x === b));
+  if (gmode === "move" || gmode === "erase" || gmode === "diff") setGmode("pen");
+});
+$("annW").addEventListener("change", () => { annW = +$("annW").value; });
+$("annSize").addEventListener("change", () => { annSize = +$("annSize").value; });
+$("annUndo").onclick = () => { if (!annHistory.length) return; annots = JSON.parse(annHistory.pop()); drawGraph(); };
+$("annClear").onclick = () => {
+  if (!annots.length) return;
+  if (!confirm("書き込みをすべて消しますか?")) return;
+  snapAnn(); annots = []; drawGraph();
+};
+async function savePng() {
+  const r = gc.getBoundingClientRect(), k = Math.max(2, 1600 / r.width);
+  const c = document.createElement("canvas");
+  c.width = Math.round(r.width * k); c.height = Math.round(r.height * k);
+  const ctx = c.getContext("2d"); ctx.setTransform(k, 0, 0, k, 0, 0);
+  const saved = gctx; gctx = ctx;
+  try { drawGraph(); } finally { gctx = saved; }
+  const blob = await new Promise(res => c.toBlob(res, "image/png"));
+  if (!blob) { alert("画像を作れませんでした"); return; }
+  const file = new File([blob], "graph.png", { type: "image/png" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: "グラフ" }); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "graph.png";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+$("btnPng").onclick = savePng;
+
+/* ============ タブ・レイアウト ============ */
+function setTab(name) {
+  document.querySelectorAll(".tabbtn").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  document.querySelectorAll(".tabpanel").forEach(p => { p.hidden = p.dataset.tab !== name; });
+  if (name === "draw") setupPad();
+}
+document.querySelectorAll(".tabbtn").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+$("goDiff").onclick = () => setGmode("diff");
+if (window.ResizeObserver) new ResizeObserver(() => setupGraph()).observe($("gwrap"));
+
 /* ============ 初期化 ============ */
-loadKey(); setupPad(); setupGraph(); syncInputs();
+loadKey(); setupPad(); setupGraph(); syncInputs(); updateModeUI(); updateIvUI(); setGmode("move"); setTab("draw");
 </script>
 </body>
 </html>

@@ -156,7 +156,7 @@
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v20</span>
+  <span style="font-size:12px;opacity:.85">試作版 v21</span>
 </header>
 
 <main id="app">
@@ -246,6 +246,7 @@
             <label><input type="radio" name="ivm" value="A" checked> A 交点の間(自動)</label>
             <label><input type="radio" name="ivm" value="B"> B 交点を選ぶ</label>
             <label><input type="radio" name="ivm" value="C"> C 区間を入力</label>
+            <label><input type="radio" name="ivm" value="D"> D 囲まれた部分すべて(最初〜最後の交点)</label>
           </div>
           <div class="row" id="ivB" hidden>
             <label>左端: <select id="selL"></select></label>
@@ -414,6 +415,7 @@
     </div>
     <div id="result" class="empty">
       <div id="resMath"></div>
+      <div id="resNote" class="msg"></div>
       <label id="stepsBar" hidden><input type="checkbox" id="showSteps"> 途中式を詳しく表示</label>
       <div id="resSteps" hidden></div>
     </div>
@@ -1078,7 +1080,7 @@ function solveQuadSteps(c, st, roots) { // c=[c0,c1,c2] 整数係数
     const f1 = linTex(r1.d, r1.n), f2 = linTex(r2.d, r2.n);
     const pw = f => /[+-]/.test(f) ? "\\left(" + f + "\\right)" : f;
     const body = D === 0 ? pw(f1) + "^{2}" : pw(f1) + pw(f2);
-    st.push({ cap: "因数分解する", tex: ipTex([C0, B, A]) + "=" + kt + body + "=0" });
+    { const left = ipTex([C0, B, A]), right = kt + body; st.push({ cap: "因数分解する", tex: (left === right ? "" : left + "=") + right + "=0" }); }
     addRoot(roots, texQ(r1), qNum(r1)); if (D > 0) addRoot(roots, texQ(r2), qNum(r2));
     return;
   }
@@ -1156,6 +1158,33 @@ function yIcptStepsTex(co) {
     { cap: "② 計算する", tex: "y=" + texQ(c0) },
     { cap: "③ y切片", tex: "\\left(0,\\ " + texQ(c0) + "\\right)" }
   ];
+}
+// 区間の途中で上下が入れ替わるとき: 区間ごとの面積(有理数のときのみ)
+function splitPieces(ex) {
+  if (!ex || ex.kind !== "rat" || ex.qs.length < 3) return null;
+  const out = [];
+  for (let i = 0; i < ex.qs.length - 1; i++) {
+    const a = ex.qs[i], b = ex.qs[i + 1], mid = (qNum(a) + qNum(b)) / 2, s = polyEvalNum(ex.co, mid) >= 0 ? 1 : -1;
+    const P = ex.co.map(c => qMul(c, Q(s, 1)));
+    const Fco = [qZero()]; P.forEach((c, j) => Fco.push(qMul(c, Q(1, j + 1))));
+    const Fa = qPolyEvalQ(Fco, a), Fb = qPolyEvalQ(Fco, b);
+    out.push({ a, b, s, P, Fco, Fa, Fb, v: qSub(Fb, Fa) });
+  }
+  return out;
+}
+function stepsTexSplit(ex) {
+  const pcs = splitPieces(ex); if (!pcs) return null;
+  const st = [{ cap: "交点で上下が入れ替わるので、区間を分けて、それぞれ(上)−(下)の積分を求める", tex: "S=" + pcs.map((p, i) => "S_{" + (i + 1) + "}").join("+") }];
+  let sum = qZero();
+  pcs.forEach((p, i) => {
+    sum = qAdd(sum, p.v);
+    st.push({ cap: "区間" + (i + 1) + ": x=" + texQ(p.a) + " 〜 " + texQ(p.b) + (p.s > 0 ? "(式1が上)" : "(式2が上)"),
+      tex: "S_{" + (i + 1) + "}=\\int_{" + texQ(p.a) + "}^{" + texQ(p.b) + "}\\left(" + polyTexX(p.P, "x") + "\\right)dx=\\left[\\,"
+        + polyTexX(p.Fco, "x") + "\\,\\right]_{" + texQ(p.a) + "}^{" + texQ(p.b) + "}=\\left(" + texQ(p.Fb) + "\\right)-\\left(" + (p.Fa.n < 0 ? texQ(p.Fa) : texQ(p.Fa)) + "\\right)=" + texQ(p.v) });
+  });
+  st.push({ cap: "合計", tex: "S=" + pcs.map(p => texQ(p.v)).join("+") + "=" + texQ(sum) });
+  const m = "①②③④⑤⑥⑦⑧⑨⑩"; st.forEach((s, i) => { s.cap = (m[i] || "") + " " + s.cap; });
+  return st;
 }
 /*REGION_END*/
 
@@ -1238,7 +1267,7 @@ function drawShade(X, Y, W, H) {
   pts.forEach((p, i) => { const px = X(p[0]), py = clampY(Y(p[1])); if (i) gctx.lineTo(px, py); else gctx.moveTo(px, py); });
   for (let i = pts.length - 1; i >= 0; i--) gctx.lineTo(X(pts[i][0]), clampY(Y(pts[i][2])));
   gctx.closePath();
-  gctx.fillStyle = "rgba(46,160,90,0.30)"; gctx.fill();
+  gctx.fillStyle = "rgba(46,160,90,0.42)"; gctx.fill();
   gctx.save(); gctx.setLineDash([5, 4]); gctx.strokeStyle = "rgba(30,120,70,0.9)"; gctx.lineWidth = 1.5;
   [R.a, R.b].forEach(x => {
     const y1 = safeCall(fn, x), y2 = safeCall(fn2, x);
@@ -1392,7 +1421,7 @@ function computeRegion() {
   let ivm = ivMode(), a, b;
   if (ivm === "A") {
     if (inter.length === 2) { a = inter[0].x; b = inter[1].x; }
-    else if (inter.length > 2) { setIvm("B"); ivm = "B"; msg("交点が3つ以上あります。B案で左端・右端を選んでください"); }
+    else if (inter.length > 2) { setIvm("B"); ivm = "B"; msg("交点が3つ以上あります。B案で左端・右端を選ぶか、D案で囲まれた部分すべてを選んでください"); }
     else { setIvm("C"); ivm = "C"; msg("交点が2つ未満です。C案で区間を入力してください"); }
   }
   if (ivm === "B") {
@@ -1401,6 +1430,10 @@ function computeRegion() {
     if (l === r) { region = { ok: false, inter }; msg("左端と右端に別の交点を選んでください", true); return; }
     if (l > r) { const t = l; l = r; r = t; }
     a = inter[l].x; b = inter[r].x;
+  }
+  if (ivm === "D") {
+    if (inter.length < 2) { region = { ok: false, inter }; msg("交点が2つ未満です。C案で区間を入力してください", true); return; }
+    a = inter[0].x; b = inter[inter.length - 1].x;
   }
   if (ivm === "C") {
     a = evalNum($("ivA").value); b = evalNum($("ivBv").value);
@@ -1418,7 +1451,7 @@ function decTex(v) { return String(+v.toPrecision(5)); }
 function renderResult() {
   const box = $("resMath"), wrapBox = $("result");
   if (!regionOn() || !region || !region.ok || !info1 || !info2) {
-    box.textContent = "";
+    box.textContent = ""; $("resNote").textContent = "";
     const can = !!(fn && ($("showXi").checked || $("showYi").checked)); // 積分領域がなくても、切片の途中式を出せる
     wrapBox.classList.toggle("empty", !can); $("stepsBar").hidden = !can;
     if (can) renderSteps(); else $("resSteps").hidden = true;
@@ -1429,29 +1462,48 @@ function renderResult() {
   const texX = v => (xTexFormatter && xTexFormatter(v)) || decTex(v);
   const aT = ex ? ex.aTex : texX(R.a), bT = ex ? ex.bTex : texX(R.b);
   const F = info1.rhs, G = info2.rhs;
+  const bodyTex = (top, bot) => bot === "0" ? "\\left(" + top + "\\right)" : (top === "0" ? "-\\left(" + bot + "\\right)" : "\\left\\{\\left(" + top + "\\right)-\\left(" + bot + "\\right)\\right\\}");
+  const pcs = (R.interior.length > 0 && ex) ? splitPieces(ex) : null;
   let body;
-  if (R.interior.length > 0) {
+  if (pcs) {
+    body = null;
+  } else if (R.interior.length > 0) {
     body = "\\left|" + (G === "0" ? "\\left(" + F + "\\right)" : "\\left(" + F + "\\right)-\\left(" + G + "\\right)") + "\\right|";
   } else {
-    const top = R.fTop ? F : G, bot = R.fTop ? G : F;
-    if (bot === "0") body = "\\left(" + top + "\\right)";
-    else if (top === "0") body = "-\\left(" + bot + "\\right)";
-    else body = "\\left\\{\\left(" + top + "\\right)-\\left(" + bot + "\\right)\\right\\}";
+    body = bodyTex(R.fTop ? F : G, R.fTop ? G : F);
   }
-  let tex = "S=\\int_{" + aT + "}^{" + bT + "}" + body + "\\,dx";
-  tex += ex ? "=" + ex.valTex + "\\approx " + decTex(ex.val) : "\\approx " + decTex(R.area);
+  let tex;
+  if (pcs) {
+    tex = "S=" + pcs.map(p => "\\int_{" + texQ(p.a) + "}^{" + texQ(p.b) + "}" + bodyTex(p.s > 0 ? F : G, p.s > 0 ? G : F) + "\\,dx").join("+")
+      + "=" + pcs.map(p => texQ(p.v)).join("+") + "=" + ex.valTex + "\\approx " + decTex(ex.val);
+  } else {
+    tex = "S=\\int_{" + aT + "}^{" + bT + "}" + body + "\\,dx";
+    tex += ex ? "=" + ex.valTex + "\\approx " + decTex(ex.val) : "\\approx " + decTex(R.area);
+  }
   try { katex.render(tex, box, { displayMode: true, throwOnError: true, strict: "ignore" }); }
   catch (e) { box.textContent = "S ≈ " + decTex(R.area); }
+  renderIntervalNote();
   renderSteps();
   if (!ex) {
     $("regionMsg").textContent = "厳密な分数・根号の値は、多項式(2次の無理数解は根号)のときだけ出せます。この式は小数で表示しています";
     $("regionMsg").className = "msg";
-  } else if (R.interior.length > 0) {
+  } else if (R.interior.length > 0 && !pcs) {
     $("regionMsg").textContent = "区間の途中で2つのグラフが交わるため、絶対値で面積を出しています";
     $("regionMsg").className = "msg";
   }
 }
 
+function renderIntervalNote() { // どの区間の面積かを明示する
+  const el = $("resNote"), R = region, inter = R.inter || [];
+  const lab = x => { const q = inter.find(p => Math.abs(p.x - x) < 1e-9 * (1 + Math.abs(x))); return q ? q.xlabel : fmtPiX(x); };
+  let t = "区間: x = " + lab(R.a) + " 〜 " + lab(R.b);
+  if (inter.length >= 3) {
+    const ia = inter.findIndex(p => Math.abs(p.x - R.a) < 1e-9 * (1 + Math.abs(R.a))), ib = inter.findIndex(p => Math.abs(p.x - R.b) < 1e-9 * (1 + Math.abs(R.b)));
+    if (ia === 0 && ib === inter.length - 1) t += "(囲まれた部分すべての合計)";
+    else if (ia >= 0 && ib >= 0) t += "(交点" + (ia + 1) + "〜" + (ib + 1) + "のあいだ。交点は全部で" + inter.length + "個。囲まれた部分すべてなら、区間を「D」にします)";
+  }
+  el.textContent = t;
+}
 function renderSteps() {
   const box = $("resSteps"), on = $("showSteps").checked;
   box.hidden = !on; box.innerHTML = "";
@@ -1473,8 +1525,10 @@ function renderSteps() {
     else { show(ir.steps); if (ir.note) msg(ir.note); }
     // 2) 面積を求める
     head("【面積を求める】");
-    if (region.interior.length > 0) msg("途中式は、区間の途中で2つのグラフが交わらない場合に表示します");
-    else {
+    if (region.interior.length > 0) {
+      const sp = stepsTexSplit(region.exact);
+      if (sp) show(sp); else msg("途中式は、区間の途中で上下が入れ替わる場合、交点が分数のときに表示します");
+    } else {
       const st = stepsTex(region.exact, region.fTop);
       if (!st) msg("途中式は、多項式の式(2次の根号を含む場合も可)のときに表示します。この式では答えのみ表示しています");
       else show(st);

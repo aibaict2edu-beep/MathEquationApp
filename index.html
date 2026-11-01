@@ -40,7 +40,11 @@
   label { font-size:13px; color:var(--sub); display:flex; align-items:center; gap:4px; }
   .fbox { margin-top:10px; }
   .fbox > .tag { font-size:13px; font-weight:600; }
-  .tag.f1 { color:#d62d2d; } .tag.f2 { color:#2457d6; }
+  .tag.f1, .tag.f2 { color:var(--ink); display:flex; align-items:center; gap:8px; }
+  .sw { display:inline-flex; gap:8px; padding:3px 3px; }
+  .fbox > .tag.f1, .fbox > .tag.f2 { margin-bottom:8px; }
+  .swb { width:28px; min-height:28px; height:28px; padding:0; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line); }
+  .swb.on { box-shadow:0 0 0 3px var(--accent); }
   .sub { border-top:1px solid var(--line); margin-top:12px; padding-top:10px; }
   #gwrap { position:relative; }
   #diffPanel { position:absolute; top:8px; right:8px; z-index:5; background:rgba(255,255,255,0.9); border:1px solid var(--line); border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.18); padding:4px 8px 6px; max-width:calc(100% - 16px); touch-action:none; user-select:none; -webkit-user-select:none; }
@@ -132,7 +136,7 @@
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v11</span>
+  <span style="font-size:12px;opacity:.85">試作版 v15</span>
 </header>
 
 <main id="app">
@@ -140,12 +144,12 @@
   <div id="left">
     <section id="formulaBox">
       <div class="fbox" style="margin-top:0">
-        <div class="tag f1">式1(赤)</div>
+        <div class="tag f1">式1 <span class="sw" data-f="1"><button class="swb on" data-c="#d62d2d" style="background:#d62d2d" aria-label="赤"></button><button class="swb" data-c="#2457d6" style="background:#2457d6" aria-label="青"></button><button class="swb" data-c="#1e8a4c" style="background:#1e8a4c" aria-label="緑"></button><button class="swb" data-c="#e67e22" style="background:#e67e22" aria-label="橙"></button><button class="swb" data-c="#8e44ad" style="background:#8e44ad" aria-label="紫"></button><button class="swb" data-c="#111111" style="background:#111111" aria-label="黒"></button></span></div>
         <input type="text" id="latex" placeholder="例: y=x^2-3x+1" autocapitalize="off" autocorrect="off" spellcheck="false">
         <div class="preview" id="preview"></div>
       </div>
       <div class="fbox" id="f2box" hidden>
-        <div class="tag f2">式2(青)</div>
+        <div class="tag f2">式2 <span class="sw" data-f="2"><button class="swb" data-c="#d62d2d" style="background:#d62d2d" aria-label="赤"></button><button class="swb on" data-c="#2457d6" style="background:#2457d6" aria-label="青"></button><button class="swb" data-c="#1e8a4c" style="background:#1e8a4c" aria-label="緑"></button><button class="swb" data-c="#e67e22" style="background:#e67e22" aria-label="橙"></button><button class="swb" data-c="#8e44ad" style="background:#8e44ad" aria-label="紫"></button><button class="swb" data-c="#111111" style="background:#111111" aria-label="黒"></button></span></div>
         <input type="text" id="latex2" placeholder="例: y=2x+1" autocapitalize="off" autocorrect="off" spellcheck="false">
         <div class="preview" id="preview2"></div>
       </div>
@@ -267,7 +271,10 @@
           </label>
         </div>
         <div class="msg">「自動」は sin・cos・tan を含む式のときπ表示になります。目盛りが込み合うときは間引きます(拡大すると細かくなります)。</div>
-        <h2 class="subh">グラフの線の太さ</h2>
+        <h2 class="subh">文字・線</h2>
+        <div class="row"><label>目盛りの文字:
+            <select id="tickSize"><option value="11" selected>小</option><option value="14">中</option><option value="18">大</option></select>
+          </label></div>
         <div class="row">
           <label>曲線:
             <select id="curveW"><option value="1.5">細</option><option value="2.5" selected>中</option><option value="4.5">太</option></select>
@@ -309,9 +316,9 @@
       <button id="gmText">文字</button>
       <button id="gmErase">消しゴム</button>
       <button id="gmZoom">範囲選択</button>
-      <button id="zoomBack" disabled>拡大を戻す</button>
+      <button id="zoomBack" disabled title="拡大を1段戻す">↩ 拡大</button>
       <span style="flex:1"></span>
-      <button id="annUndo">書込を戻す</button>
+      <button id="annUndo">↩ 書込</button>
       <button id="btnFocus">拡大表示</button>
       <button id="btnPng" class="primary">PNG保存</button>
     </div>
@@ -1006,13 +1013,16 @@ function drawShade(X, Y, W, H) {
   });
   gctx.restore();
 }
+const fcol = { 1: "#d62d2d", 2: "#2457d6" };
+function tickFs() { return +$("tickSize").value || 11; }
 function drawGraph() {
   const r = gc.getBoundingClientRect(), W = r.width, H = r.height;
   const { xmin, xmax, ymin, ymax } = view;
   const X = x => (x - xmin) / (xmax - xmin) * W;
   const Y = y => H - (y - ymin) / (ymax - ymin) * H;
   gctx.fillStyle = "#fff"; gctx.fillRect(0, 0, W, H);
-  gctx.font = "11px sans-serif";
+  const fs = tickFs();
+  gctx.font = fs + "px sans-serif";
   const sy = niceStep(ymax - ymin), xt = xTicks(W);
   gctx.lineWidth = 1;
   xt.forEach(t => { gctx.strokeStyle = "#e6eaf2"; gctx.beginPath(); gctx.moveTo(X(t.x), 0); gctx.lineTo(X(t.x), H); gctx.stroke(); });
@@ -1026,18 +1036,18 @@ function drawGraph() {
   gctx.fillStyle = "#555";
   xt.forEach(t => {
     if (t.zero) return;
-    gctx.textAlign = "center"; gctx.fillText(t.label, X(t.x), Math.min(ay + 13, H - 3));
+    gctx.textAlign = "center"; gctx.fillText(t.label, X(t.x), Math.min(ay + fs + 2, H - 3));
   });
   for (let y = Math.ceil(ymin / sy) * sy; y <= ymax; y += sy) {
     if (Math.abs(y) < sy / 1e3) continue;
-    gctx.textAlign = "left"; gctx.fillText(fmt(y), Math.min(ax + 4, W - 30), Y(y) - 2);
+    gctx.textAlign = "left"; gctx.fillText(fmt(y), Math.min(ax + 4, W - fs * 3), Y(y) - 2);
   }
-  gctx.textAlign = "left"; gctx.fillText("0", Math.min(ax + 4, W - 10), Math.min(ay + 13, H - 3));
+  gctx.textAlign = "left"; gctx.fillText("0", Math.min(ax + 4, W - 10), Math.min(ay + fs + 2, H - 3));
   // 領域 → 曲線 → 交点
   drawShade(X, Y, W, H);
   const isTan = inf => !!(inf && inf.expr && /\btan\(/.test(inf.expr));
-  if (fn) drawCurve(fn, "#d62d2d", X, Y, W, H, isTan(info1));
-  if (fn2 && useG()) drawCurve(fn2, "#2457d6", X, Y, W, H, isTan(info2));
+  if (fn) drawCurve(fn, fcol[1], X, Y, W, H, isTan(info1));
+  if (fn2 && useG()) drawCurve(fn2, fcol[2], X, Y, W, H, isTan(info2));
   drawDots(X, Y, W, H);
   drawDiffMark(X, Y, W, H);
   drawAnnotations(X, Y);
@@ -1295,8 +1305,8 @@ function rootRange() { const m = (view.xmax - view.xmin) * 0.005; return [view.x
 function computeIcpt() { // x切片・y切片(各曲線)
   icpt = [];
   const curves = [];
-  if (fn) curves.push({ f: fn, col: "#d62d2d" });
-  if (fn2 && useG()) curves.push({ f: fn2, col: "#2457d6" });
+  if (fn) curves.push({ f: fn, col: fcol[1] });
+  if (fn2 && useG()) curves.push({ f: fn2, col: fcol[2] });
   const near = (a, b) => Math.abs(a - b) < 1e-7 * (1 + Math.abs(a));
   for (const c of curves) {
     const lab = makeLabeler(c.f, c.f);
@@ -1331,9 +1341,9 @@ function drawDots(X, Y, W, H) {
     gctx.beginPath(); gctx.arc(px, py, 5, 0, Math.PI * 2);
     gctx.fillStyle = p.col; gctx.fill(); gctx.lineWidth = 2; gctx.strokeStyle = "#fff"; gctx.stroke();
     if (all || shownDots.has(dotKey(p.x, p.y))) {
-      gctx.font = "12px sans-serif"; gctx.textAlign = "left"; gctx.textBaseline = "alphabetic";
-      const w = gctx.measureText(p.label).width, lx = Math.min(px + 8, W - w - 3), ly = Math.max(py - 8, 14);
-      gctx.fillStyle = "rgba(255,255,255,0.8)"; gctx.fillRect(lx - 2, ly - 12, w + 4, 16);
+      const cf = tickFs() + 1; gctx.font = cf + "px sans-serif"; gctx.textAlign = "left"; gctx.textBaseline = "alphabetic";
+      const w = gctx.measureText(p.label).width, lx = Math.min(px + 8, W - w - 3), ly = Math.max(py - 8, cf + 2);
+      gctx.fillStyle = "rgba(255,255,255,0.8)"; gctx.fillRect(lx - 2, ly - cf, w + 4, cf + 4);
       gctx.fillStyle = "#111"; gctx.fillText(p.label, lx, ly);
     }
   });
@@ -1368,8 +1378,8 @@ function updateDiffUI() {
 function diffFail(msg) { diffPt = { ok: false, msg }; updateDiffUI(); drawGraph(); }
 function diffTap(px, py) {
   const cands = [];
-  if (fn) cands.push({ f: fn, n: 1, col: "#d62d2d" });
-  if (fn2 && useG()) cands.push({ f: fn2, n: 2, col: "#2457d6" });
+  if (fn) cands.push({ f: fn, n: 1, col: fcol[1] });
+  if (fn2 && useG()) cands.push({ f: fn2, n: 2, col: fcol[2] });
   if (!cands.length) { diffFail("先にグラフを描いてください"); return; }
   const d = px2data(px, py);
   let best = null;
@@ -1427,7 +1437,7 @@ gc.addEventListener("pointerup", e => {
   else if (gmode === "move") dotTap(px, py);
 });
 gc.addEventListener("pointercancel", () => { tapStart = null; });
-["showXi", "showYi", "showTan", "curveW"].forEach(id => $(id).addEventListener("change", drawGraph));
+["showXi", "showYi", "showTan", "curveW", "tickSize"].forEach(id => $(id).addEventListener("change", drawGraph));
 $("showCoords").addEventListener("change", () => { if (region && region.inter) renderInter(region.inter); drawGraph(); });
 $("diffClear").onclick = () => { diffPt = null; updateDiffUI(); drawGraph(); };
 // 浮かせた微分パネルをドラッグで動かす(ボタン・チェックは通常どおり操作できる)
@@ -1464,11 +1474,12 @@ const HINTS = {
 };
 function panAllowed(e) { if (gmode === "zoom") return false; return gmode === "move" || gmode === "diff" || ($("penOnly").checked && e.pointerType === "touch"); }
 function setGmode(m) {
+  if (m !== "diff") diffPt = null; // 微分モードを抜けたら接線・点を消す
   gmode = m;
   [["move", "gmMove"], ["diff", "gmDiff"], ["pen", "gmPen"], ["text", "gmText"], ["erase", "gmErase"], ["zoom", "gmZoom"]].forEach(([k, id]) => $(id).classList.toggle("on", k === m));
   $("annHint").textContent = HINTS[m];
   $("annOpts").hidden = !(m === "pen" || m === "text" || m === "erase"); // 色・太さは書き込みモードのときだけ
-  updateDiffUI();
+  updateDiffUI(); if (typeof drawGraph === "function" && gc.width) drawGraph();
 }
 function scheduleDraw() { if (drawQ) return; drawQ = true; requestAnimationFrame(() => { drawQ = false; drawGraph(); }); }
 function snapAnn() { annHistory.push(JSON.stringify(annots)); if (annHistory.length > 60) annHistory.shift(); }
@@ -1639,6 +1650,12 @@ async function savePng() {
 $("btnPng").onclick = savePng;
 
 
+document.querySelectorAll(".swb").forEach(b => b.addEventListener("click", () => {
+  const n = +b.parentNode.dataset.f; fcol[n] = b.dataset.c;
+  b.parentNode.querySelectorAll(".swb").forEach(x => x.classList.toggle("on", x === b));
+  refreshAll();
+}));
+
 /* ============ 拡大表示・文字選択の防止・微分パネルの置き場所 ============ */
 function toggleFocus() {
   const r1 = gc.getBoundingClientRect(), w1 = r1.width, h1 = r1.height;
@@ -1670,7 +1687,7 @@ function placeDiffPanel(px, py) { // 触った点と反対側の隅へ(自分で
 
 /* ============ 範囲選択で拡大(表示のみ。1段ずつ戻せる) ============ */
 const zoomStack = [];
-function updateZoomBack() { $("zoomBack").disabled = !zoomStack.length; $("zoomBack").textContent = zoomStack.length ? "拡大を戻す(" + zoomStack.length + ")" : "拡大を戻す"; }
+function updateZoomBack() { $("zoomBack").disabled = !zoomStack.length; $("zoomBack").textContent = zoomStack.length ? "↩ 拡大(" + zoomStack.length + ")" : "↩ 拡大"; }
 (function () {
   const box = $("selBox"); let z = null;
   function rect(e) { // グラフと同じ縦横比の四角にする

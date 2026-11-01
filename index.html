@@ -136,7 +136,7 @@
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v15</span>
+  <span style="font-size:12px;opacity:.85">試作版 v16</span>
 </header>
 
 <main id="app">
@@ -273,7 +273,7 @@
         <div class="msg">「自動」は sin・cos・tan を含む式のときπ表示になります。目盛りが込み合うときは間引きます(拡大すると細かくなります)。</div>
         <h2 class="subh">文字・線</h2>
         <div class="row"><label>目盛りの文字:
-            <select id="tickSize"><option value="11" selected>小</option><option value="14">中</option><option value="18">大</option></select>
+            <select id="tickSize"><option value="22" selected>小</option><option value="28">中</option><option value="36">大</option></select>
           </label></div>
         <div class="row">
           <label>曲線:
@@ -954,8 +954,8 @@ function setupGraph() {
   gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawGraph();
 }
-function niceStep(range) {
-  const raw = range / 8, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+function niceStep(range, n) {
+  const raw = range / (n || 8), p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
 }
 function fmt(v) { return Math.abs(v) < 1e-12 ? "0" : String(+v.toPrecision(6)); }
@@ -1014,7 +1014,7 @@ function drawShade(X, Y, W, H) {
   gctx.restore();
 }
 const fcol = { 1: "#d62d2d", 2: "#2457d6" };
-function tickFs() { return +$("tickSize").value || 11; }
+function tickFs() { return +$("tickSize").value || 22; }
 function drawGraph() {
   const r = gc.getBoundingClientRect(), W = r.width, H = r.height;
   const { xmin, xmax, ymin, ymax } = view;
@@ -1023,7 +1023,7 @@ function drawGraph() {
   gctx.fillStyle = "#fff"; gctx.fillRect(0, 0, W, H);
   const fs = tickFs();
   gctx.font = fs + "px sans-serif";
-  const sy = niceStep(ymax - ymin), xt = xTicks(W);
+  const sy = niceStep(ymax - ymin, Math.max(2, Math.min(8, Math.floor(H / (fs * 2.6))))), xt = xTicks(W);
   gctx.lineWidth = 1;
   xt.forEach(t => { gctx.strokeStyle = "#e6eaf2"; gctx.beginPath(); gctx.moveTo(X(t.x), 0); gctx.lineTo(X(t.x), H); gctx.stroke(); });
   for (let y = Math.ceil(ymin / sy) * sy; y <= ymax; y += sy) {
@@ -1264,13 +1264,13 @@ function piStep(W) { // 目盛りの間隔(込み合うときは倍々にして�
   const D = +$("axisStep").value || 2, base = Math.PI / D, ppu = W / (view.xmax - view.xmin);
   const mults = D === 6 ? [1, 2, 3, 6, 12, 24, 48, 96, 192, 384] : [1, 2, 4, 8, 16, 32, 64, 128, 256, 512];
   let mult = mults[mults.length - 1];
-  for (const m of mults) { if (base * m * ppu >= 28) { mult = m; break; } }
+  for (const m of mults) { if (base * m * ppu >= Math.max(28, tickFs() * 2.8)) { mult = m; break; } }
   return { D, mult, step: base * mult };
 }
 function xTicks(W) {
   const kind = axisKind(), out = [];
   if (kind === "num") {
-    const sx = niceStep(view.xmax - view.xmin);
+    const sx = niceStep(view.xmax - view.xmin, Math.max(2, Math.min(8, Math.floor(W / (tickFs() * 4)))));
     for (let x = Math.ceil(view.xmin / sx) * sx; x <= view.xmax; x += sx) out.push({ x, label: fmt(x), zero: Math.abs(x) < sx / 1e3 });
     return out;
   }

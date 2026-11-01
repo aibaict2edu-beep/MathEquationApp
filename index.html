@@ -58,7 +58,7 @@
   #gwrap { position:relative; width:100%; height:40vh; min-height:240px; }
   #graph { width:100%; height:100%; aspect-ratio:auto; }
   #gbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 4px; }
-  #gbar button { padding:8px 12px; min-height:42px; }
+  #gbar button { padding:6px 10px; min-height:38px; font-size:14px; }
   #modeStrip { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:44px; margin:2px 0 6px; }
   #modeStrip #annHint { flex:1; min-width:150px; min-height:0; }
   #annOpts { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
@@ -123,12 +123,16 @@
   body.focus #gwrap { width:100%; height:calc(100vh - 150px); aspect-ratio:auto; min-height:240px; }
   @supports (height:100dvh) { body.focus #gwrap { height:calc(100dvh - 150px); } }
   body.focus #btnFocus { background:var(--accent); color:#fff; }
+
+  #selBox { position:absolute; z-index:6; border:2px dashed #2457d6; background:rgba(36,87,214,0.12); pointer-events:none; }
+  #selBox[hidden] { display:none; }
+  #zoomBack { min-height:42px; }
 </style>
 </head>
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v10</span>
+  <span style="font-size:12px;opacity:.85">試作版 v11</span>
 </header>
 
 <main id="app">
@@ -263,6 +267,12 @@
           </label>
         </div>
         <div class="msg">「自動」は sin・cos・tan を含む式のときπ表示になります。目盛りが込み合うときは間引きます(拡大すると細かくなります)。</div>
+        <h2 class="subh">グラフの線の太さ</h2>
+        <div class="row">
+          <label>曲線:
+            <select id="curveW"><option value="1.5">細</option><option value="2.5" selected>中</option><option value="4.5">太</option></select>
+          </label>
+        </div>
         <h2 class="subh">交点の点</h2>
         <div class="row">
           <label><input type="checkbox" id="showXi" checked> x切片</label>
@@ -298,8 +308,10 @@
       <button id="gmPen">ペン</button>
       <button id="gmText">文字</button>
       <button id="gmErase">消しゴム</button>
+      <button id="gmZoom">範囲選択</button>
+      <button id="zoomBack" disabled>拡大を戻す</button>
       <span style="flex:1"></span>
-      <button id="annUndo">書き込みを戻す</button>
+      <button id="annUndo">書込を戻す</button>
       <button id="btnFocus">拡大表示</button>
       <button id="btnPng" class="primary">PNG保存</button>
     </div>
@@ -322,6 +334,7 @@
     </div>
     <div id="gwrap">
       <canvas id="graph"></canvas>
+      <div id="selBox" hidden></div>
       <div id="diffPanel" hidden>
         <div id="diffHandle">≡ 微分(ドラッグで移動できます)</div>
         <div class="dpRow">
@@ -945,7 +958,7 @@ function fmtX(x) { // 分数で表せれば分数、なければ小数
   return String(+x.toPrecision(4));
 }
 function drawCurve(f, color, X, Y, W, H, asym) {
-  gctx.strokeStyle = color; gctx.lineWidth = 2.5; gctx.lineJoin = "round";
+  gctx.strokeStyle = color; gctx.lineWidth = +$("curveW").value || 2.5; gctx.lineJoin = "round";
   gctx.beginPath();
   let pen = false, prevPy = 0, havePrev = false, xPrev = 0, yPrev = 0;
   const jumps = [], span = view.ymax - view.ymin;
@@ -1197,7 +1210,7 @@ $("btnIvApply").onclick = refreshAll;
 ["ivA", "ivBv"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter") refreshAll(); }));
 $("btnApplyRange").onclick = () => { if (readInputs()) { $("graphMsg").textContent = ""; refreshAll(); } };
 $("btnAuto").onclick = () => { if (readInputs()) autoY(); };
-$("btnReset").onclick = () => { view = defaultView(); syncInputs(); refreshAll(); };
+$("btnReset").onclick = () => { view = defaultView(); zoomStack.length = 0; if (typeof updateZoomBack === "function") updateZoomBack(); syncInputs(); refreshAll(); };
 function zoom(f) {
   const cx = (view.xmin + view.xmax) / 2, cy = (view.ymin + view.ymax) / 2;
   const hx = (view.xmax - view.xmin) / 2 * f, hy = (view.ymax - view.ymin) / 2 * f;
@@ -1414,7 +1427,7 @@ gc.addEventListener("pointerup", e => {
   else if (gmode === "move") dotTap(px, py);
 });
 gc.addEventListener("pointercancel", () => { tapStart = null; });
-["showXi", "showYi", "showTan"].forEach(id => $(id).addEventListener("change", drawGraph));
+["showXi", "showYi", "showTan", "curveW"].forEach(id => $(id).addEventListener("change", drawGraph));
 $("showCoords").addEventListener("change", () => { if (region && region.inter) renderInter(region.inter); drawGraph(); });
 $("diffClear").onclick = () => { diffPt = null; updateDiffUI(); drawGraph(); };
 // 浮かせた微分パネルをドラッグで動かす(ボタン・チェックは通常どおり操作できる)
@@ -1446,12 +1459,13 @@ const HINTS = {
   diff: "曲線の近くをタップで微分を表示(頂点・交点に吸着)",
   pen: "ペンで書き込み(グラフと一緒に動きます)",
   text: "タップで文字を追加/文字をタップで編集・ドラッグで移動(改行は \\n)",
-  erase: "消したい書き込みをなぞると消えます"
+  erase: "消したい書き込みをなぞると消えます",
+  zoom: "拡大したい範囲をドラッグで囲むと、その範囲を画面いっぱいに表示します"
 };
-function panAllowed(e) { return gmode === "move" || gmode === "diff" || ($("penOnly").checked && e.pointerType === "touch"); }
+function panAllowed(e) { return gmode !== "zoom" && gmode === "move" || gmode === "diff" || ($("penOnly").checked && e.pointerType === "touch"); }
 function setGmode(m) {
   gmode = m;
-  [["move", "gmMove"], ["diff", "gmDiff"], ["pen", "gmPen"], ["text", "gmText"], ["erase", "gmErase"]].forEach(([k, id]) => $(id).classList.toggle("on", k === m));
+  [["move", "gmMove"], ["diff", "gmDiff"], ["pen", "gmPen"], ["text", "gmText"], ["erase", "gmErase"], ["zoom", "gmZoom"]].forEach(([k, id]) => $(id).classList.toggle("on", k === m));
   $("annHint").textContent = HINTS[m];
   $("annOpts").hidden = !(m === "pen" || m === "text" || m === "erase"); // 色・太さは書き込みモードのときだけ
   updateDiffUI();
@@ -1526,7 +1540,7 @@ function addTextAt(px, py) {
   drawGraph();
 }
 gc.addEventListener("pointerdown", e => {
-  if (panAllowed(e)) return;
+  if (panAllowed(e) || gmode === "zoom") return;
   e.preventDefault(); gc.setPointerCapture(e.pointerId);
   const r = gc.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
   if (gmode === "pen") {
@@ -1652,6 +1666,44 @@ function placeDiffPanel(px, py) { // 触った点と反対側の隅へ(自分で
   const top = py > wr.height / 2 ? 8 : Math.max(8, wr.height - pr.height - 8);
   p.style.left = left + "px"; p.style.top = top + "px"; p.style.right = "auto";
 }
+
+
+/* ============ 範囲選択で拡大(表示のみ。1段ずつ戻せる) ============ */
+const zoomStack = [];
+function updateZoomBack() { $("zoomBack").disabled = !zoomStack.length; $("zoomBack").textContent = zoomStack.length ? "拡大を戻す(" + zoomStack.length + ")" : "拡大を戻す"; }
+(function () {
+  const box = $("selBox"); let z = null;
+  function rect(e) { // グラフと同じ縦横比の四角にする
+    const r = gc.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    let w = Math.abs(x - z.x), hh = Math.abs(y - z.y); const R = r.width / r.height;
+    if (w / (hh || 1e-9) > R) hh = w / R; else w = hh * R;
+    const l = x >= z.x ? z.x : z.x - w, t = y >= z.y ? z.y : z.y - hh;
+    return { l, t, w, h: hh };
+  }
+  gc.addEventListener("pointerdown", e => {
+    if (gmode !== "zoom") return;
+    e.preventDefault(); gc.setPointerCapture(e.pointerId);
+    const r = gc.getBoundingClientRect(); z = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top };
+  });
+  gc.addEventListener("pointermove", e => {
+    if (!z || e.pointerId !== z.id) return;
+    const q = rect(e); box.hidden = false;
+    box.style.left = q.l + "px"; box.style.top = q.t + "px"; box.style.width = q.w + "px"; box.style.height = q.h + "px";
+  });
+  const end = (e, ok) => {
+    if (!z || e.pointerId !== z.id) return;
+    const q = rect(e); z = null; box.hidden = true;
+    if (!ok || q.w < 14 || q.h < 14) return;
+    const a = px2data(q.l, q.t + q.h), b = px2data(q.l + q.w, q.t); // 左下と右上
+    zoomStack.push({ ...view }); if (zoomStack.length > 30) zoomStack.shift();
+    view = { xmin: a.x, xmax: b.x, ymin: a.y, ymax: b.y };
+    syncInputs(); refreshAll(); updateZoomBack();
+  };
+  gc.addEventListener("pointerup", e => end(e, true));
+  gc.addEventListener("pointercancel", e => end(e, false));
+})();
+$("zoomBack").onclick = () => { const v = zoomStack.pop(); if (v) { view = v; syncInputs(); refreshAll(); } updateZoomBack(); };
+$("gmZoom").addEventListener("click", () => setGmode("zoom"));
 
 /* ============ タブ・レイアウト ============ */
 function setTab(name) {

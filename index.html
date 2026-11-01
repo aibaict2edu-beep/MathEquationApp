@@ -74,7 +74,13 @@
   #zoomBtns { position:absolute; right:8px; bottom:8px; z-index:4; display:flex; flex-direction:column; gap:6px; }
   #zoomBtns button { width:40px; height:40px; min-height:40px; padding:0; border-radius:20px; font-size:20px; line-height:1; background:rgba(255,255,255,0.92); box-shadow:0 1px 6px rgba(0,0,0,.25); }
   #result { margin-top:6px; }
-  #result:empty { display:none; }
+  #result.empty { display:none; }
+  #stepsBar { display:block; font-size:14px; margin-top:4px; }
+  #stepsBar[hidden], #resSteps[hidden] { display:none; }
+  #resSteps .stepcap { font-size:12.5px; color:var(--sub); margin-top:6px; }
+  #resSteps .stepmsg { font-size:13px; color:var(--sub); margin-top:4px; }
+  #resSteps .katex-display { margin:2px 0; text-align:left; }
+  #resSteps .katex-display > .katex { text-align:left; }
   .tabbar { display:flex; gap:4px; margin:-2px 0 10px; border-bottom:2px solid var(--line); }
   .tabbtn { flex:1; border-radius:8px 8px 0 0; border-bottom:none; min-height:44px; }
   .tabbtn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
@@ -136,7 +142,7 @@
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v17</span>
+  <span style="font-size:12px;opacity:.85">試作版 v18</span>
 </header>
 
 <main id="app">
@@ -287,6 +293,7 @@
           <label><input type="checkbox" id="showXi" checked> x切片</label>
           <label><input type="checkbox" id="showYi" checked> y切片</label>
           <label><input type="checkbox" id="showCoords"> 座標を表示</label>
+          <label><input type="checkbox" id="showXonly"> x座標(積分領域の交点)</label>
         </div>
         <div class="msg">座標は、「移動」モードで点をタップすると1つずつ表示・非表示にできます。</div>
       </div>
@@ -361,7 +368,11 @@
         <button id="btnReset" aria-label="初期範囲">⌂</button>
       </div>
     </div>
-    <div id="result"></div>
+    <div id="result" class="empty">
+      <div id="resMath"></div>
+      <label id="stepsBar" hidden><input type="checkbox" id="showSteps"> 途中式を詳しく表示</label>
+      <div id="resSteps" hidden></div>
+    </div>
   </div>
 </main>
 
@@ -781,7 +792,7 @@ function exactArea(h, a, b, interior, numArea) {
       tot = qAdd(tot, I);
     }
     if (Math.abs(qNum(tot) - numArea) > 1e-6 * (1 + Math.abs(numArea))) return null;
-    return { valTex: texQ(tot), aTex: texQ(qs[0]), bTex: texQ(qs[qs.length - 1]), val: qNum(tot) };
+    return { valTex: texQ(tot), aTex: texQ(qs[0]), bTex: texQ(qs[qs.length - 1]), val: qNum(tot), kind: "rat", co, qs, tot };
   }
   if (co.length === 3 && interior.length === 0) { // 2次式で、a,b が2つの解(無理数)
     const A = co[2], B = co[1], C = co[0];
@@ -800,7 +811,55 @@ function exactArea(h, a, b, interior, numArea) {
     const val = qNum(coef) * Math.sqrt(m);
     if (Math.abs(val - numArea) > 1e-6 * (1 + Math.abs(numArea))) return null;
     const cTex = (coef.n === 1 && coef.d === 1) ? "" : texQ(coef);
-    return { valTex: cTex + "\\sqrt{" + m + "}", aTex: texSurd(u, Q(-w.n, w.d), m), bTex: texSurd(u, w, m), val };
+    return { valTex: cTex + "\\sqrt{" + m + "}", aTex: texSurd(u, Q(-w.n, w.d), m), bTex: texSurd(u, w, m), val, kind: "surd", co, u, w, m, A };
+  }
+  return null;
+}
+
+// 係数(低次→高次)の多項式を TeX にする。xs は変数部分(代入のときは \left(2\right) など)
+function polyTexX(co, xs) {
+  let out = "";
+  for (let k = co.length - 1; k >= 0; k--) {
+    const c = co[k]; if (c.n === 0) continue;
+    const neg = c.n < 0, ac = Q(Math.abs(c.n), c.d);
+    const coef = (k > 0 && ac.n === 1 && ac.d === 1) ? "" : texQ(ac);
+    const pw = k === 0 ? "" : (k === 1 ? xs : xs + "^{" + k + "}");
+    const term = coef + pw;
+    out += (out === "" ? (neg ? "-" : "") : (neg ? "-" : "+")) + term;
+  }
+  return out || "0";
+}
+// 面積の途中式。[{cap, tex}, ...] を返す。区間の途中で交わるとき・厳密値が出せないときは null
+function stepsTex(ex, fTop) {
+  if (!ex) return null;
+  const s = fTop ? 1 : -1;
+  const P = ex.co.map(c => qMul(c, Q(s, 1)));
+  const Ptex = polyTexX(P, "x");
+  if (ex.kind === "rat") {
+    const a = ex.qs[0], b = ex.qs[ex.qs.length - 1];
+    const Fco = [qZero()]; P.forEach((c, j) => Fco.push(qMul(c, Q(1, j + 1))));
+    const wrap = t => "\\left(" + t + "\\right)";
+    const Fa = qPolyEvalQ(Fco, a), Fb = qPolyEvalQ(Fco, b);
+    const tq = q => q.n < 0 ? wrap(texQ(q)) : texQ(q);
+    return [
+      { cap: "① (上の式)−(下の式) を展開して整理する", tex: "S=\\int_{" + texQ(a) + "}^{" + texQ(b) + "}\\left(" + Ptex + "\\right)dx" },
+      { cap: "② 原始関数(積分した式)を求める", tex: "=\\left[\\," + polyTexX(Fco, "x") + "\\,\\right]_{" + texQ(a) + "}^{" + texQ(b) + "}" },
+      { cap: "③ 上端・下端を代入する", tex: "=\\left(" + polyTexX(Fco, wrap(texQ(b))) + "\\right)-\\left(" + polyTexX(Fco, wrap(texQ(a))) + "\\right)" },
+      { cap: "④ それぞれ計算する", tex: "=" + tq(Fb) + "-" + (Fa.n < 0 ? wrap(texQ(Fa)) : texQ(Fa)) },
+      { cap: "⑤ 答え", tex: "=" + ex.valTex }
+    ];
+  }
+  if (ex.kind === "surd") {
+    const k = Q(Math.abs(ex.A.n), ex.A.d), kt = (k.n === 1 && k.d === 1) ? "" : texQ(k);
+    const w2 = qMul(Q(2, 1), ex.w), w2t = (w2.n === 1 && w2.d === 1) ? "" : texQ(w2);
+    return [
+      { cap: "① (上の式)−(下の式) を展開して整理する", tex: "S=\\int_{\\alpha}^{\\beta}\\left(" + Ptex + "\\right)dx" },
+      { cap: "② 解の公式で、被積分関数=0 の解を α, β とする(α<β)", tex: "\\alpha=" + ex.aTex + ",\\quad \\beta=" + ex.bTex },
+      { cap: "③ 因数分解の形に書く", tex: Ptex + "=-" + kt + "\\left(x-\\alpha\\right)\\left(x-\\beta\\right)" },
+      { cap: "④ 公式 ∫(x−α)(x−β)dx = −(β−α)³/6 を使う", tex: "S=\\frac{" + (kt || "1") + "}{6}\\left(\\beta-\\alpha\\right)^{3}" },
+      { cap: "⑤ β−α を求めて代入する", tex: "\\beta-\\alpha=" + w2t + "\\sqrt{" + ex.m + "},\\quad S=\\frac{" + (kt || "1") + "}{6}\\left(" + w2t + "\\sqrt{" + ex.m + "}\\right)^{3}" },
+      { cap: "⑥ 答え", tex: "=" + ex.valTex }
+    ];
   }
   return null;
 }
@@ -882,7 +941,14 @@ function surdStr(a, b, m) { // a+b√m を文字列に
 // 交点 (x,y) の座標ラベルを作る関数を返す。h=f-g が2次式で解が無理数なら厳密、それ以外は分数/小数
 function makeLabeler(f, h) {
   const ch = fitPoly(h), cf = fitPoly(f), sq = quadSurd(ch);
-  return (x, y) => {
+  const xlab = x => {
+    if (sq) for (const sgn of [-1, 1]) {
+      const w = Q(sgn * sq.w.n, sq.w.d);
+      if (Math.abs(x - (qNum(sq.u) + qNum(w) * Math.sqrt(sq.m))) < 1e-6) return surdStr(sq.u, w, sq.m);
+    }
+    return fmtPiX(x);
+  };
+  const lab = (x, y) => {
     if (sq) {
       for (const sgn of [-1, 1]) {
         const w = Q(sgn * sq.w.n, sq.w.d);
@@ -896,6 +962,8 @@ function makeLabeler(f, h) {
     }
     return "(" + fmtPiX(x) + ", " + fmtX(y) + ")";
   };
+  lab.x = xlab;
+  return lab;
 }
 // 点 x での微分係数。多項式なら分数で厳密、それ以外は数値微分。尖った点は不可
 function derivInfo(f, x) {
@@ -1168,7 +1236,7 @@ function computeRegion() {
   if (!regionOn() || !fn || !fn2) { renderInter([]); return; }
   const f = fn, g = fn2, h = x => f(x) - g(x);
   const lab = makeLabeler(f, h);
-  const inter = findRoots(h, ...rootRange()).map(x => { const y = safeCall(f, x); return { x, y, label: lab(x, y) }; });
+  const inter = findRoots(h, ...rootRange()).map(x => { const y = safeCall(f, x); return { x, y, label: lab(x, y), xlabel: lab.x(x) }; });
   renderInter(inter);
   let ivm = ivMode(), a, b;
   if (ivm === "A") {
@@ -1197,8 +1265,9 @@ function computeRegion() {
 }
 function decTex(v) { return String(+v.toPrecision(5)); }
 function renderResult() {
-  const box = $("result");
-  if (!regionOn() || !region || !region.ok || !info1 || !info2) { box.textContent = ""; return; }
+  const box = $("resMath"), wrapBox = $("result");
+  if (!regionOn() || !region || !region.ok || !info1 || !info2) { box.textContent = ""; wrapBox.classList.add("empty"); $("stepsBar").hidden = true; $("resSteps").hidden = true; return; }
+  wrapBox.classList.remove("empty"); $("stepsBar").hidden = false;
   const R = region, ex = R.exact;
   const texX = v => (xTexFormatter && xTexFormatter(v)) || decTex(v);
   const aT = ex ? ex.aTex : texX(R.a), bT = ex ? ex.bTex : texX(R.b);
@@ -1216,6 +1285,7 @@ function renderResult() {
   tex += ex ? "=" + ex.valTex + "\\approx " + decTex(ex.val) : "\\approx " + decTex(R.area);
   try { katex.render(tex, box, { displayMode: true, throwOnError: true, strict: "ignore" }); }
   catch (e) { box.textContent = "S ≈ " + decTex(R.area); }
+  renderSteps();
   if (!ex) {
     $("regionMsg").textContent = "厳密な分数・根号の値は、多項式(2次の無理数解は根号)のときだけ出せます。この式は小数で表示しています";
     $("regionMsg").className = "msg";
@@ -1224,6 +1294,22 @@ function renderResult() {
     $("regionMsg").className = "msg";
   }
 }
+
+function renderSteps() {
+  const box = $("resSteps"), on = $("showSteps").checked;
+  box.hidden = !on; box.innerHTML = "";
+  if (!on || !region || !region.ok) return;
+  const msg = t => { const d = document.createElement("div"); d.className = "stepmsg"; d.textContent = t; box.appendChild(d); };
+  if (region.interior.length > 0) { msg("途中式は、区間の途中で2つのグラフが交わらない場合に表示します"); return; }
+  const st = stepsTex(region.exact, region.fTop);
+  if (!st) { msg("途中式は、多項式の式(2次の根号を含む場合も可)のときに表示します。この式では答えのみ表示しています"); return; }
+  st.forEach(s => {
+    const c = document.createElement("div"); c.className = "stepcap"; c.textContent = s.cap; box.appendChild(c);
+    const t = document.createElement("div"); box.appendChild(t);
+    try { katex.render(s.tex, t, { displayMode: true, throwOnError: true, strict: "ignore" }); } catch (e) { t.textContent = s.tex; }
+  });
+}
+$("showSteps").addEventListener("change", renderSteps);
 
 /* ============ イベント ============ */
 $("btnGraph").onclick = drawFromInput;
@@ -1348,12 +1434,58 @@ function computeIcpt() { // x切片・y切片(各曲線)
 function visibleDots() {
   const out = [];
   const add = p => { if (!out.some(q => Math.abs(q.x - p.x) < 1e-7 * (1 + Math.abs(p.x)) && Math.abs(q.y - p.y) < 1e-7 * (1 + Math.abs(p.y)))) out.push(p); };
-  if (regionOn() && region && region.inter) region.inter.forEach(p => add({ x: p.x, y: p.y, label: p.label, col: "#111" }));
+  if (regionOn() && region && region.inter) region.inter.forEach(p => add({ x: p.x, y: p.y, label: p.label, xlabel: p.xlabel, col: "#111" }));
   if (fn) icpt.forEach(p => { if ((p.kind === "x" && $("showXi").checked) || (p.kind === "y" && $("showYi").checked)) add(p); });
   return out;
 }
+
+// 積分領域の交点: x軸へ点線を引き、x軸との交点に x座標を書く(重なるときは矢印で離して書く)
+function drawXMarks(X, Y, W, H, dots) {
+  if (!$("showXonly").checked) return;
+  const fs = tickFs(), cf = fs + 1, ay = Math.min(Math.max(Y(0), 0), H), ax = Math.min(Math.max(X(0), 0), W);
+  gctx.save();
+  gctx.font = fs + "px sans-serif";
+  const occ = []; // 使用済みの四角 [x0, y0, x1, y1]
+  xTicks(W).forEach(t => { if (t.zero) return; const w = gctx.measureText(t.label).width; occ.push([X(t.x) - w / 2 - 2, ay + 2, X(t.x) + w / 2 + 2, ay + fs + 6]); });
+  const sy = niceStep(view.ymax - view.ymin, Math.max(2, Math.min(8, Math.floor(H / (fs * 2.6)))));
+  for (let y = Math.ceil(view.ymin / sy) * sy; y <= view.ymax; y += sy) {
+    if (Math.abs(y) < sy / 1e3) continue;
+    const w = gctx.measureText(fmt(y)).width, lx = Math.min(ax + 4, W - fs * 3);
+    occ.push([lx - 2, Y(y) - fs - 2, lx + w + 2, Y(y) + 2]);
+  }
+  const hit = r => occ.some(o => r[0] < o[2] && r[2] > o[0] && r[1] < o[3] && r[3] > o[1]);
+  const list = dots.filter(p => p.xlabel).map(p => ({ p, px: X(p.x), py: Y(p.y) })).filter(d => d.px >= 0 && d.px <= W).sort((a, b) => a.px - b.px);
+  gctx.font = cf + "px sans-serif";
+  list.forEach(d => {
+    const { p, px, py } = d, below = py <= ay; // 点がx軸より上なら、ラベルは軸の下側へ
+    // 点線
+    gctx.setLineDash([4, 4]); gctx.strokeStyle = "#777"; gctx.lineWidth = 1.5;
+    gctx.beginPath(); gctx.moveTo(px, py); gctx.lineTo(px, ay); gctx.stroke(); gctx.setLineDash([]);
+    gctx.beginPath(); gctx.arc(px, ay, 3.5, 0, Math.PI * 2); gctx.fillStyle = "#111"; gctx.fill();
+    const w = gctx.measureText(p.xlabel).width, lh = cf + 4;
+    let x0 = Math.min(Math.max(px - w / 2, 2), W - w - 2), chosen = null;
+    for (let k = 0; k < 6 && !chosen; k++) {
+      const gap = k === 0 ? 4 : 10 + (k - 1) * (lh + 2); // k=0: 軸のすぐ脇 / k>=1: 矢印で離す
+      const top = below ? ay + gap : ay - gap - lh, r = [x0 - 2, top, x0 + w + 2, top + lh];
+      if (r[1] < 0 || r[3] > H) continue;
+      if (!hit(r)) chosen = { r, k };
+    }
+    if (!chosen) { const top = below ? Math.min(ay + 4, H - lh) : Math.max(ay - 4 - lh, 0); chosen = { r: [x0 - 2, top, x0 + w + 2, top + lh], k: 0 }; }
+    const r = chosen.r; occ.push(r);
+    if (chosen.k > 0) { // 矢印
+      const y1 = below ? ay + 3 : ay - 3, y2 = below ? r[1] - 1 : r[3] + 1, dir = below ? 1 : -1;
+      gctx.strokeStyle = "#111"; gctx.lineWidth = 1.3; gctx.beginPath(); gctx.moveTo(px, y1); gctx.lineTo(px, y2); gctx.stroke();
+      gctx.beginPath(); gctx.moveTo(px, y2); gctx.lineTo(px - 3.5, y2 - 6 * dir); gctx.lineTo(px + 3.5, y2 - 6 * dir); gctx.closePath(); gctx.fillStyle = "#111"; gctx.fill();
+    }
+    gctx.fillStyle = "rgba(255,255,255,0.85)"; gctx.fillRect(r[0], r[1], r[2] - r[0], r[3] - r[1]);
+    gctx.fillStyle = "#111"; gctx.textAlign = "left"; gctx.textBaseline = "alphabetic";
+    gctx.fillText(p.xlabel, x0, r[1] + cf);
+  });
+  gctx.restore();
+}
 function drawDots(X, Y, W, H) {
   const all = $("showCoords").checked;
+  drawXMarks(X, Y, W, H, visibleDots());
   visibleDots().forEach(p => {
     const px = X(p.x), py = Y(p.y);
     if (px < -5 || px > W + 5 || py < -5 || py > H + 5) return;
@@ -1456,7 +1588,7 @@ gc.addEventListener("pointerup", e => {
   else if (gmode === "move") dotTap(px, py);
 });
 gc.addEventListener("pointercancel", () => { tapStart = null; });
-["showXi", "showYi", "showTan", "curveW", "tickSize"].forEach(id => $(id).addEventListener("change", drawGraph));
+["showXi", "showYi", "showTan", "curveW", "tickSize", "showXonly"].forEach(id => $(id).addEventListener("change", drawGraph));
 $("equalScale").addEventListener("change", () => { if (applyEqual()) syncInputs(); refreshAll(); });
 $("showCoords").addEventListener("change", () => { if (region && region.inter) renderInter(region.inter); drawGraph(); });
 $("diffClear").onclick = () => { diffPt = null; updateDiffUI(); drawGraph(); };

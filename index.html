@@ -150,7 +150,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v28</span>
+    <span style="font-size:12px;opacity:.85">試作版 v29</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -1403,6 +1403,21 @@ function drawGraph() {
   drawCoefGhost(X, Y, W, H);
   if (fn) drawCurve(fn, fcol[1], X, Y, W, H, isTan(info1));
   if (fn2 && useG()) drawCurve(fn2, fcol[2], X, Y, W, H, isTan(info2));
+  { const S = cutSetup();
+    if (S && ccut) {
+      const pg = conicPolygon(S.q.c, 240);
+      if (pg) {
+        gctx.save(); gctx.beginPath(); pg.forEach((p, i) => { if (i) gctx.lineTo(X(p[0]), Y(p[1])); else gctx.moveTo(X(p[0]), Y(p[1])); }); gctx.closePath(); gctx.clip();
+        const pts = []; for (let px = 0; px <= W; px += 2) { const x = view.xmin + (view.xmax - view.xmin) * px / W, y = safeCall(S.g, x); if (isFinite(y)) pts.push([px, Math.max(-H, Math.min(2 * H, Y(y)))]); }
+        if (pts.length > 1) {
+          [[-H * 2, "rgba(46,160,90,0.42)"], [H * 3, "rgba(240,150,40,0.45)"]].forEach(([edge, col]) => {
+            gctx.beginPath(); pts.forEach((p, i) => { if (i) gctx.lineTo(p[0], p[1]); else gctx.moveTo(p[0], p[1]); });
+            gctx.lineTo(pts[pts.length - 1][0], edge); gctx.lineTo(pts[0][0], edge); gctx.closePath(); gctx.fillStyle = col; gctx.fill();
+          });
+        }
+        gctx.restore();
+      }
+    } }
   if (conicWhole()) {
     const pg = conicPolygon(cn[0].c, 240);
     if (pg) { gctx.beginPath(); pg.forEach((p, i) => { if (i) gctx.lineTo(X(p[0]), Y(p[1])); else gctx.moveTo(X(p[0]), Y(p[1])); }); gctx.closePath(); gctx.fillStyle = "rgba(46,160,90,0.42)"; gctx.fill(); }
@@ -1676,7 +1691,70 @@ function conicPolygon(c, n) { // 楕円の内部(画面に塗る用) データ�
   }
   return pts;
 }
-const conicWhole = () => regionOn() && cn[0] && (cn[0].kind === "ellipse" || cn[0].kind === "circle");
+
+/* --- 円・楕円と y=g(x) で分けられる部分の面積 --- */
+function fitExact(val) { // val = (a + bπ + c√m)/d の形を探す。TeX と一緒に返す(なければ null)
+  if (!isFinite(val)) return null;
+  const ms = [0, 2, 3, 5, 6, 7];
+  for (let d = 1; d <= 12; d++) {
+    let best = null;
+    for (const m of ms) {
+      const sm = m ? Math.sqrt(m) : 0;
+      for (let c = m ? -24 : 0; c <= (m ? 24 : 0); c++) {
+        if (m && c === 0) continue;
+        for (let b = -24; b <= 24; b++) {
+          const a = Math.round(val * d - b * Math.PI - c * sm);
+          if (Math.abs(a) > 200) continue;
+          if (Math.abs((a + b * Math.PI + c * sm) / d - val) < 1e-9 * (1 + Math.abs(val))) {
+            const cost = Math.abs(a) + Math.abs(b) * 2 + Math.abs(c) * 2 + (m ? 3 : 0);
+            if (!best || cost < best.cost) best = { a, b, c, m, d, cost };
+          }
+        }
+      }
+    }
+    if (best) {
+      const { a, b, c, m, d: dd } = best;
+      const g = gcdAll([a, b, c, dd]) || 1; // 約分
+      const A = a / g, B = b / g, C = c / g, D = dd / g;
+      const terms = [];
+      const add = (k, s) => { if (k === 0) return; const mag = Math.abs(k), body = (mag === 1 && s) ? s : mag + s; terms.push((k < 0 ? "-" : (terms.length ? "+" : "")) + body); };
+      add(B, "\\pi"); add(C, m ? "\\sqrt{" + m + "}" : ""); add(A, "");
+      let num = terms.join("") || "0";
+      const tex = D === 1 ? num : (terms.length === 1 && !num.startsWith("-") ? "\\frac{" + num + "}{" + D + "}" : (num.startsWith("-") && terms.length === 1 ? "-\\frac{" + num.slice(1) + "}{" + D + "}" : "\\frac{" + num + "}{" + D + "}"));
+      return { tex };
+    }
+  }
+  return null;
+}
+function ellipseCut(c, g, gco) { // 軸に平行な楕円(円)を y=g(x) で上下に分ける
+  const ai = conicAreaInfo(c); if (!ai || !ai.axis) return null;
+  const o = ai.center, Fc = conicVal(c, o.x, o.y), a = Math.sqrt(-Fc / c.A), b = Math.sqrt(-Fc / c.C), p = o.x, q = o.y;
+  const yu = x => q + b * Math.sqrt(Math.max(0, 1 - ((x - p) / a) ** 2)), yl = x => q - b * Math.sqrt(Math.max(0, 1 - ((x - p) / a) ** 2));
+  const S = x => { const u = Math.max(-1, Math.min(1, (x - p) / a)); return a * b / 2 * (u * Math.sqrt(1 - u * u) + Math.asin(u)); }; // ∫(y-q) の弧の部分
+  const intU = (s, t) => q * (t - s) + S(t) - S(s), intL = (s, t) => q * (t - s) - (S(t) - S(s));
+  const polyInt = (s, t) => {
+    if (gco) { const F = x => { let r = 0; for (let j = 0; j < gco.length; j++) r += qNum(gco[j]) * Math.pow(x, j + 1) / (j + 1); return r; }; return F(t) - F(s); }
+    return simpson(g, s, t, 4000);
+  };
+  const h = x => conicVal(c, x, g(x));
+  const eps = 1e-9 * (1 + a);
+  const rs = findRoots(h, p - a, p + a, 4000).filter(x => x > p - a + eps && x < p + a - eps).sort((u, v) => u - v);
+  const bp = [p - a, ...rs, p + a], ints = [];
+  let up = 0, low = 0;
+  for (let i = 0; i + 1 < bp.length; i++) {
+    const s = bp[i], t = bp[i + 1], m = (s + t) / 2, gm = safeCall(g, m);
+    if (!isFinite(gm)) return null;
+    let kind, u, l;
+    if (gm > yu(m)) { kind = "above"; u = 0; l = intU(s, t) - intL(s, t); }
+    else if (gm < yl(m)) { kind = "below"; u = intU(s, t) - intL(s, t); l = 0; }
+    else { kind = "within"; const gi = polyInt(s, t); u = intU(s, t) - gi; l = gi - intL(s, t); }
+    ints.push({ s, t, kind, up: u, low: l }); up += u; low += l;
+  }
+  const nice = rs.every(r => qFromFloat(r, 60, 1e-9) || qFromFloat(r * r, 60, 1e-9));
+  return { p, q, a, b, roots: rs, ints, up, low, whole: Math.PI * a * b, ai, nice };
+}
+
+const conicWhole = () => regionOn() && cn[0] && (cn[0].kind === "ellipse" || cn[0].kind === "circle") && !(typeof cutSetup === "function" && cutSetup());
 /*CONIC_END*/
 
 function isImplicitEq(src) { // y=f(x) 以外の「=」を含む式
@@ -1700,6 +1778,96 @@ function conicCompile(src) {
   const cl = conicClass(c);
   return { c, kind: cl.kind, name: cl.name };
 }
+/* --- 円・楕円と y=g(x) の面積(画面側) --- */
+let ccut = null;
+const isEll = q => !!q && (q.kind === "ellipse" || q.kind === "circle");
+function cutSetup() {
+  if (!regionOn() || !useG()) return null;
+  const ci = isEll(cn[0]) ? 0 : (isEll(cn[1]) ? 1 : -1);
+  if (ci < 0 || cn[1 - ci]) return null;
+  const g = ci === 0 ? fn2 : fn, gi = ci === 0 ? info2 : info1;
+  return g && gi ? { ci, q: cn[ci], g, gi } : null;
+}
+function computeConicCut(S) {
+  ccut = null; region = null;
+  const msg = (t, err) => { $("regionMsg").textContent = t; $("regionMsg").className = "msg" + (err ? " err" : ""); };
+  const c = S.q.c, gco = fitPoly(S.g);
+  const r = ellipseCut(c, S.g, gco);
+  if (!r) { renderInter([]); msg("傾いた楕円と他のグラフの面積は未対応です(円・軸に平行な楕円のみ)", true); return; }
+  const h = x => conicVal(c, x, S.g(x)), lab = makeLabeler(S.g, h);
+  const inter = r.roots.map(x => {
+    const y = safeCall(S.g, x), yt = numTex(y), simple = !/\./.test(yt);
+    return { x, y, label: simple ? "(" + lab.x(x) + ", " + fmtX(y) + ")" : lab(x, y), xlabel: lab.x(x), xtex: lab.xtex(x), tex: simple ? "\\left(" + lab.xtex(x) + ",\\ " + yt + "\\right)" : lab.tex(x, y) };
+  });
+  region = { ok: false, inter };
+  renderInter(inter);
+  ccut = { ...r, S, gco, inter };
+  msg(inter.length === 0 ? "グラフが円・楕円と交わらないので、内側は全体が片側になります" : "グラフで分けた上側・下側、両方の面積を出しています");
+}
+function exOrDec(v, nice) { const e = nice ? fitExact(v) : null; return { tex: e ? e.tex : null, dec: decTex(v) }; }
+function cutValTex(name, v, nice) { const e = exOrDec(v, nice); return name + "&=" + (e.tex ? e.tex + "\\approx " : "\\approx ") + e.dec; }
+function renderConicCutResult() {
+  const box = $("resMath"), wrapBox = $("result"), R = ccut;
+  wrapBox.classList.remove("empty"); $("stepsBar").hidden = false; $("nfBox").hidden = true;
+  if (!R) { box.textContent = ""; $("resNote").textContent = ""; $("resSteps").hidden = true; return; }
+  const whole = R.ai.q ? conicAreaTexVal(R.S.q.c, R.ai) : null;
+  const tex = "\\begin{aligned}" + cutValTex("S_{\\text{上}}", R.up, R.nice) + "\\\\" + cutValTex("S_{\\text{下}}", R.low, R.nice) + "\\\\S_{\\text{上}}+S_{\\text{下}}&=" + (whole ? whole + "\\approx " : "\\approx ") + decTex(R.whole) + "\\end{aligned}";
+  try { katex.render(tex, box, { displayMode: true, throwOnError: true, strict: "ignore" }); }
+  catch (e) { box.textContent = "上側 ≈ " + decTex(R.up) + " / 下側 ≈ " + decTex(R.low); }
+  $("resNote").textContent = "上側 = グラフ y=g(x) より上の部分、下側 = それより下の部分(どちらも円・楕円の内側)。緑が上側、橙が下側です";
+  renderSteps();
+}
+function cutPolyTex(c) { // Ax²+Bxy+Cy²+Dx+Ey+F=0 の TeX
+  const t = []; const add = (k, s) => { if (k === 0) return; const m = Math.abs(k); t.push((k < 0 ? "-" : (t.length ? "+" : "")) + ((m === 1 && s) ? "" : m) + s); };
+  add(c.A, "x^{2}"); add(c.B, "xy"); add(c.C, "y^{2}"); add(c.D, "x"); add(c.E, "y"); add(c.F, "");
+  return t.join("") + "=0";
+}
+function conicCutSteps(R) { // [{type:'head'|'cap'|'tex'|'msg', t}]
+  const out = [], c = R.S.q.c, ai = R.ai, q = ai.q;
+  const head = t => out.push({ k: "head", t }), cap = t => out.push({ k: "cap", t }), tx = t => out.push({ k: "tex", t }), ms = t => out.push({ k: "msg", t });
+  head("【円・楕円とグラフの交点を求める】");
+  const gco = R.gco;
+  if (gco && gco.length <= 2 && c.ex && q) {
+    const m = gco[1] || qZero(), n = gco[0] || qZero();
+    cap("円・楕円の方程式に、グラフの式 y=" + R.S.gi.rhs + " を代入します(上の式を x と y で表すと下のとおり)"); tx(cutPolyTex(c));
+    const Q2 = qAdd(Q(c.A, 1), qAdd(qMul(Q(c.B, 1), m), qMul(Q(c.C, 1), qMul(m, m))));
+    const Q1 = qAdd(qAdd(qMul(Q(c.B, 1), n), qMul(Q(2 * c.C, 1), qMul(m, n))), qAdd(Q(c.D, 1), qMul(Q(c.E, 1), m)));
+    const Q0 = qAdd(qMul(Q(c.C, 1), qMul(n, n)), qAdd(qMul(Q(c.E, 1), n), Q(c.F, 1)));
+    let L = lcm(lcm(Q2.d, Q1.d), Q0.d); let ints = [Q0, Q1, Q2].map(z => z.n * (L / z.d)); const G = gcdAll(ints) || 1; ints = ints.map(v => v / G);
+    if (ints[2] === 0) ms("代入して整理すると x の1次式になります(交点は1つ)");
+    else {
+      cap("x について整理します"); tx(ipTex(ints) + "=0");
+      const st = [], roots = []; solveQuadSteps(ints, st, roots);
+      st.forEach(s => { cap(s.cap); if (s.tex) tx(s.tex); });
+    }
+  } else ms("交点は、グラフから数値で求めています(グラフの式が1次式までのときに、途中式を表示します)");
+  if (R.inter.length) { cap("交点の座標(y=" + R.S.gi.rhs + " に代入)"); tx(R.inter.map(p => p.tex).join(",\\quad ")); }
+  else ms("交点はありません");
+  if (!q) { head("【面積を求める】"); ms("この式では途中式を表示できません。面積は数値で求めています"); return out; }
+  head("【面積を求める】");
+  const sh = (v, name) => v.n === 0 ? name : "(" + name + (v.n > 0 ? "-" : "+") + texQ(Q(Math.abs(v.n), v.d)) + ")";
+  const kq = sqrtQ(qDiv(q.b2, q.a2)), kt = kq.tex === "1" ? "" : kq.tex;
+  const root = "\\sqrt{" + texQ(q.a2) + "-" + sh(q.px, "x") + "^{2}}", qy = q.py.n === 0 ? "" : texQ(q.py);
+  const Yu = qy + (qy ? "+" : "") + kt + root, Yl = qy + "-" + kt + root;
+  cap("楕円(円)の上の弧と下の弧を y の式で表します"); tx("y_{\\text{上}}=" + Yu + ",\\qquad y_{\\text{下}}=" + Yl);
+  cap("√ の積分は、x−p=a sinθ と置換して求めます(公式)"); tx("\\int\\sqrt{a^{2}-t^{2}}\\,dt=\\frac{1}{2}\\left(t\\sqrt{a^{2}-t^{2}}+a^{2}\\arcsin\\frac{t}{a}\\right)");
+  cap("交点で区間を分け、区間ごとに「上の曲線−下の曲線」を積分します");
+  const gT = R.S.gi.rhs, lim = v => numTex(v);
+  R.ints.forEach((it, i) => {
+    const a = lim(it.s), b = lim(it.t), I = "\\int_{" + a + "}^{" + b + "}";
+    let up, low;
+    if (it.kind === "within") { up = I + "\\left\\{\\left(" + Yu + "\\right)-\\left(" + gT + "\\right)\\right\\}dx"; low = I + "\\left\\{\\left(" + gT + "\\right)-\\left(" + Yl + "\\right)\\right\\}dx"; }
+    else if (it.kind === "below") { up = I + "\\left\\{\\left(" + Yu + "\\right)-\\left(" + Yl + "\\right)\\right\\}dx"; low = "0"; }
+    else { up = "0"; low = I + "\\left\\{\\left(" + Yu + "\\right)-\\left(" + Yl + "\\right)\\right\\}dx"; }
+    const ev = v => { if (Math.abs(v) < 1e-12) return "0"; const e = exOrDec(v, R.nice); return e.tex ? e.tex + "\\approx " + e.dec : "\\approx " + e.dec; };
+    cap("区間 " + (i + 1) + "(" + (it.kind === "within" ? "グラフが円・楕円の内側を通る部分" : it.kind === "below" ? "グラフが円・楕円より下" : "グラフが円・楕円より上") + ")");
+    tx("\\begin{aligned}S_{\\text{上}," + (i + 1) + "}&=" + (up === "0" ? "" : up + "=") + ev(it.up) + "\\\\S_{\\text{下}," + (i + 1) + "}&=" + (low === "0" ? "" : low + "=") + ev(it.low) + "\\end{aligned}");
+  });
+  cap("区間ごとの面積を足します"); tx("\\begin{aligned}" + cutValTex("S_{\\text{上}}", R.up, R.nice) + "\\\\" + cutValTex("S_{\\text{下}}", R.low, R.nice) + "\\end{aligned}");
+  if (!R.nice) ms("交点が分数・√ で表せないため、面積は小数で表示しています");
+  return out;
+}
+
 function drawConic(q, color, X, Y, W, H) {
   if (q.kind === "empty") return;
   const segs = conicSegs(q.c, view, W, H, 5);
@@ -1759,8 +1927,9 @@ function drawFromInput() {
         catch (e) { $("graphMsg").textContent = "式2がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; }
       }
     } else { fn2 = () => 0; info2 = { rhs: "0" }; }
-    const wholeOnly = cn[0] && (cn[0].kind === "ellipse" || cn[0].kind === "circle") && !cn[1] && (!useG() || !fn2);
-    if ((cn[0] || cn[1]) && !wholeOnly) { $("graphMsg").textContent = "この組み合わせの面積は次の段階で対応します。円・楕円は、式2を空にすると内側全体の面積を出せます"; $("graphMsg").className = "msg"; }
+    const ellOne = (isEll(cn[0]) && !cn[1]) || (isEll(cn[1]) && !cn[0]);
+    const wholeOnly = ellOne;
+    if ((cn[0] || cn[1]) && !wholeOnly) { $("graphMsg").textContent = "この組み合わせの面積は未対応です。円・楕円1つと、y=g(x) の式(または式2を空)の組み合わせで使えます"; $("graphMsg").className = "msg"; }
   }
   { const el = cn.find(q => q && (q.kind === "ellipse" || q.kind === "circle"));
     if (el && isInitialView()) {
@@ -1815,6 +1984,7 @@ function computeRegion() {
   region = null;
   $("regionMsg").textContent = ""; $("regionMsg").className = "msg";
   const msg = (t, err) => { $("regionMsg").textContent = t; $("regionMsg").className = "msg" + (err ? " err" : ""); };
+  { const S = cutSetup(); if (S) { computeConicCut(S); return; } ccut = null; }
   if (!regionOn() || !fn || !fn2) { renderInter([]); return; }
   const f = fn, g = fn2, h = x => f(x) - g(x);
   const lab = makeLabeler(f, h);
@@ -1865,6 +2035,7 @@ function renderConicResult() {
 }
 function renderResult() {
   const box = $("resMath"), wrapBox = $("result");
+  if (cutSetup()) { renderConicCutResult(); return; }
   if (conicWhole()) { renderConicResult(); return; }
   if (!regionOn() || !region || !region.ok || !info1 || !info2) {
     box.textContent = ""; $("resNote").textContent = "";
@@ -1932,6 +2103,18 @@ function renderSteps() {
   box.hidden = !on; box.innerHTML = "";
   $("nfBox").hidden = !(on && region && region.ok && region.exact && region.exact.kind === "surd" && region.interior.length === 0);
   if (!on) return;
+  if (cutSetup()) { // 円・楕円とグラフで分けた面積の途中式
+    $("nfBox").hidden = true;
+    if (!ccut) return;
+    conicCutSteps(ccut).forEach(s => {
+      const d = document.createElement("div");
+      if (s.k === "head") d.className = "stephead"; else if (s.k === "cap") d.className = "stepcap"; else if (s.k === "msg") d.className = "stepmsg";
+      if (s.k === "tex") { try { katex.render(s.t, d, { displayMode: true, throwOnError: true, strict: "ignore" }); } catch (e) { d.textContent = s.t; } }
+      else d.textContent = s.t;
+      box.appendChild(d);
+    });
+    return;
+  }
   if (conicWhole()) { // 円・楕円全体の面積の途中式
     $("nfBox").hidden = true;
     const q = cn[0], ai = conicAreaInfo(q.c);

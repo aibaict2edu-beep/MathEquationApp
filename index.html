@@ -156,7 +156,7 @@
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v22</span>
+  <span style="font-size:12px;opacity:.85">試作版 v23</span>
 </header>
 
 <main id="app">
@@ -1772,7 +1772,8 @@ function drawXMarks(X, Y, W, H, dots) {
   gctx.save();
   gctx.font = fs + "px sans-serif";
   const occ = []; // 使用済みの四角 [x0, y0, x1, y1]
-  xTicks(W).forEach(t => { if (t.zero) return; const bt = mlBox(gctx, t.label, fs); occ.push([X(t.x) - bt.w / 2 - 2, ay + 2, X(t.x) + bt.w / 2 + 2, ay + bt.asc + bt.desc + 4]); });
+  const xt = xTicks(W), rangeX = view.xmax - view.xmin;
+  xt.forEach(t => { if (t.zero) return; const bt = mlBox(gctx, t.label, fs); occ.push([X(t.x) - bt.w / 2 - 2, ay + 2, X(t.x) + bt.w / 2 + 2, ay + bt.asc + bt.desc + 4]); });
   const sy = niceStep(view.ymax - view.ymin, Math.max(2, Math.min(8, Math.floor(H / (fs * 2.6)))));
   for (let y = Math.ceil(view.ymin / sy) * sy; y <= view.ymax; y += sy) {
     if (Math.abs(y) < sy / 1e3) continue;
@@ -1788,6 +1789,7 @@ function drawXMarks(X, Y, W, H, dots) {
     gctx.setLineDash([4, 4]); gctx.strokeStyle = "#777"; gctx.lineWidth = 1.5;
     gctx.beginPath(); gctx.moveTo(px, py); gctx.lineTo(px, ay); gctx.stroke(); gctx.setLineDash([]);
     gctx.beginPath(); gctx.arc(px, ay, 3.5, 0, Math.PI * 2); gctx.fillStyle = "#111"; gctx.fill();
+    if (xt.some(t => Math.abs(t.x - p.x) <= 1e-7 * rangeX + 1e-12)) return; // 目盛りの数字がすでに出ている値は、点線と点だけにする
     const bx = mlBox(gctx, p.xlabel, cf), w = bx.w, lh = bx.asc + bx.desc + 4;
     let x0 = Math.min(Math.max(px - w / 2, 2), W - w - 2), chosen = null;
     for (let k = 0; k < 6 && !chosen; k++) {

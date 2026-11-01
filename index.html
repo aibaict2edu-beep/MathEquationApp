@@ -104,12 +104,31 @@
       #pad { height:clamp(130px, calc(100dvh - 440px), 340px); }
     }
   }
+
+  /* ===== v10: 文字選択の防止 / 微分パネルを小さく / 拡大表示 ===== */
+  #gwrap, #gbar, #modeStrip, #annOpts, #zoomBtns, #pad, #tabsBox .tabbar, #tabsBox .tabpanel[data-tab="draw"] > .row {
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; }
+  #graph, #pad { -webkit-user-drag:none; }
+  #gwrap ::selection, #graph::selection { background:transparent; }
+  #diffPanel { background:rgba(255,255,255,0.82); padding:3px 7px 4px; border-radius:10px; font-size:13px; }
+  #diffPanel .dpRow { gap:6px; margin:1px 0; }
+  #diffPanel button { min-height:28px; padding:2px 8px; font-size:12px; }
+  #diffPanel label { font-size:11px; }
+  #diffArrow { width:38px; height:38px; font-size:22px; border-radius:8px; }
+  .diffInfo { font-size:.82em; min-height:20px; }
+  #diffHandle { font-size:10px; }
+  body.focus > header, body.focus #left { display:none; }
+  body.focus main#app { grid-template-columns:1fr; padding:6px; }
+  body.focus #right { position:static; overflow:visible; }
+  body.focus #gwrap { width:100%; height:calc(100vh - 150px); aspect-ratio:auto; min-height:240px; }
+  @supports (height:100dvh) { body.focus #gwrap { height:calc(100dvh - 150px); } }
+  body.focus #btnFocus { background:var(--accent); color:#fff; }
 </style>
 </head>
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v9</span>
+  <span style="font-size:12px;opacity:.85">試作版 v10</span>
 </header>
 
 <main id="app">
@@ -281,6 +300,7 @@
       <button id="gmErase">消しゴム</button>
       <span style="flex:1"></span>
       <button id="annUndo">書き込みを戻す</button>
+      <button id="btnFocus">拡大表示</button>
       <button id="btnPng" class="primary">PNG保存</button>
     </div>
     <div id="modeStrip">
@@ -1390,7 +1410,7 @@ gc.addEventListener("pointerup", e => {
   const r = gc.getBoundingClientRect(), s = tapStart; tapStart = null;
   const px = e.clientX - r.left, py = e.clientY - r.top;
   if (Math.hypot(px - s.x, py - s.y) > 6) return; // ドラッグはタップではない
-  if (gmode === "diff") diffTap(px, py);
+  if (gmode === "diff") { diffTap(px, py); placeDiffPanel(px, py); }
   else if (gmode === "move") dotTap(px, py);
 });
 gc.addEventListener("pointercancel", () => { tapStart = null; });
@@ -1412,7 +1432,7 @@ $("diffClear").onclick = () => { diffPt = null; updateDiffUI(); drawGraph(); };
     const wr = wrap.getBoundingClientRect(), pr = p.getBoundingClientRect();
     const l = Math.max(0, Math.min(wr.width - pr.width, e.clientX - wr.left - st.dx));
     const t = Math.max(0, Math.min(wr.height - pr.height, e.clientY - wr.top - st.dy));
-    p.style.left = l + "px"; p.style.top = t + "px"; p.style.right = "auto";
+    p.style.left = l + "px"; p.style.top = t + "px"; p.style.right = "auto"; p.dataset.moved = "1";
   });
   const end = e => { if (st && e.pointerId === st.id) st = null; };
   p.addEventListener("pointerup", end); p.addEventListener("pointercancel", end);
@@ -1603,6 +1623,35 @@ async function savePng() {
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 $("btnPng").onclick = savePng;
+
+
+/* ============ 拡大表示・文字選択の防止・微分パネルの置き場所 ============ */
+function toggleFocus() {
+  const r1 = gc.getBoundingClientRect(), w1 = r1.width, h1 = r1.height;
+  document.body.classList.toggle("focus");
+  const on = document.body.classList.contains("focus");
+  $("btnFocus").textContent = on ? "元に戻す" : "拡大表示";
+  const r2 = gc.getBoundingClientRect();
+  if (w1 > 0 && h1 > 0 && r2.width > 0 && r2.height > 0) { // 1pxあたりの目盛りを保ち、見える範囲だけ広げる
+    const cx = (view.xmin + view.xmax) / 2, cy = (view.ymin + view.ymax) / 2;
+    const hx = (view.xmax - view.xmin) / 2 * (r2.width / w1), hy = (view.ymax - view.ymin) / 2 * (r2.height / h1);
+    view = { xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy };
+    syncInputs();
+  }
+  setupGraph(); setupPad();
+}
+$("btnFocus").onclick = toggleFocus;
+function noSelect(e) { const t = e.target; if (t && t.closest && t.closest("input,textarea,select")) return; e.preventDefault(); }
+["gwrap", "pad", "gbar", "modeStrip"].forEach(id => { const el = $(id); ["selectstart", "contextmenu", "dragstart"].forEach(ev => el.addEventListener(ev, noSelect)); });
+gc.addEventListener("pointerup", () => { const s = window.getSelection && window.getSelection(); if (s && s.rangeCount) s.removeAllRanges(); });
+function placeDiffPanel(px, py) { // 触った点と反対側の隅へ(自分で動かした後は動かさない)
+  const p = $("diffPanel"), wr = gc.getBoundingClientRect();
+  if (p.hidden || p.dataset.moved) return;
+  const pr = p.getBoundingClientRect();
+  const left = px > wr.width / 2 ? 8 : Math.max(8, wr.width - pr.width - 8);
+  const top = py > wr.height / 2 ? 8 : Math.max(8, wr.height - pr.height - 8);
+  p.style.left = left + "px"; p.style.top = top + "px"; p.style.right = "auto";
+}
 
 /* ============ タブ・レイアウト ============ */
 function setTab(name) {

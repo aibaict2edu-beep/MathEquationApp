@@ -156,7 +156,7 @@
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v23</span>
+  <span style="font-size:12px;opacity:.85">試作版 v24</span>
 </header>
 
 <main id="app">
@@ -416,7 +416,8 @@
     <div id="result" class="empty">
       <div id="resMath"></div>
       <div id="resNote" class="msg"></div>
-      <label id="stepsBar" hidden><input type="checkbox" id="showSteps"> 途中式を詳しく表示</label>
+      <div id="stepsBar" hidden><label><input type="checkbox" id="showSteps"> 途中式を詳しく表示</label>
+        <label id="nfBox" hidden style="margin-left:14px"><input type="checkbox" id="noFormula"> √を含むとき、公式を使わずに計算する</label></div>
       <div id="resSteps" hidden></div>
     </div>
   </div>
@@ -876,7 +877,7 @@ function polyTexX(co, xs) {
   return out || "0";
 }
 // 面積の途中式。[{cap, tex}, ...] を返す。区間の途中で交わるとき・厳密値が出せないときは null
-function stepsTex(ex, fTop) {
+function stepsTex(ex, fTop, noFormula) {
   if (!ex) return null;
   const s = fTop ? 1 : -1;
   const P = ex.co.map(c => qMul(c, Q(s, 1)));
@@ -894,6 +895,21 @@ function stepsTex(ex, fTop) {
       { cap: "④ それぞれ計算する", tex: "=" + tq(Fb) + "-" + (Fa.n < 0 ? wrap(texQ(Fa)) : texQ(Fa)) },
       { cap: "⑤ 答え", tex: "=" + ex.valTex }
     ];
+  }
+  if (ex.kind === "surd" && noFormula) { // 公式を使わず、原始関数に α, β を代入して計算する
+    const Fco = [qZero()]; P.forEach((c, j) => Fco.push(qMul(c, Q(1, j + 1))));
+    const wn = Q(-ex.w.n, ex.w.d);
+    const vb = surdEvalPoly(Fco, ex.u, ex.w, ex.m), va = surdEvalPoly(Fco, ex.u, wn, ex.m);
+    const tb = texSurd(vb.a, vb.b, ex.m), ta = texSurd(va.a, va.b, ex.m);
+    const da = qSub(vb.a, va.a), db = qSub(vb.b, va.b);
+    const st = [
+      { cap: "① (上の式)−(下の式) を展開して整理する", tex: "S=\\int_{\\alpha}^{\\beta}\\left(" + Ptex + "\\right)dx" },
+      { cap: "② 解の公式で、被積分関数=0 の解を α, β とする(α<β)", tex: "\\alpha=" + ex.aTex + ",\\quad \\beta=" + ex.bTex },
+      { cap: "③ 原始関数(積分した式)を求める", tex: "S=\\left[\\," + polyTexX(Fco, "x") + "\\,\\right]_{\\alpha}^{\\beta}=F(\\beta)-F(\\alpha)" },
+      { cap: "④ β, α をそれぞれ代入して計算する(√" + ex.m + "×√" + ex.m + "=" + ex.m + " を使って整理する)", tex: "F(\\beta)=" + tb + ",\\quad F(\\alpha)=" + ta },
+      { cap: "⑤ 引き算する", tex: "S=\\left(" + tb + "\\right)-\\left(" + ta + "\\right)=" + ex.valTex }
+    ];
+    return st;
   }
   if (ex.kind === "surd") {
     const k = Q(Math.abs(ex.A.n), ex.A.d), kt = (k.n === 1 && k.d === 1) ? "" : texQ(k);
@@ -1585,6 +1601,7 @@ function renderIntervalNote() { // どの区間の面積かを明示する
 function renderSteps() {
   const box = $("resSteps"), on = $("showSteps").checked;
   box.hidden = !on; box.innerHTML = "";
+  $("nfBox").hidden = !(on && region && region.ok && region.exact && region.exact.kind === "surd" && region.interior.length === 0);
   if (!on) return;
   const msg = t => { const d = document.createElement("div"); d.className = "stepmsg"; d.textContent = t; box.appendChild(d); };
   const head = t => { const d = document.createElement("div"); d.className = "stephead"; d.textContent = t; box.appendChild(d); };
@@ -1607,7 +1624,7 @@ function renderSteps() {
       const sp = stepsTexSplit(region.exact);
       if (sp) show(sp); else msg("途中式は、区間の途中で上下が入れ替わる場合、交点が分数のときに表示します");
     } else {
-      const st = stepsTex(region.exact, region.fTop);
+      const st = stepsTex(region.exact, region.fTop, $("noFormula").checked);
       if (!st) msg("途中式は、多項式の式(2次の根号を含む場合も可)のときに表示します。この式では答えのみ表示しています");
       else show(st);
     }
@@ -1636,6 +1653,7 @@ function renderSteps() {
   });
 }
 $("showSteps").addEventListener("change", renderSteps);
+$("noFormula").addEventListener("change", renderSteps);
 ["showXi", "showYi"].forEach(id => $(id).addEventListener("change", renderResult));
 
 /* ============ イベント ============ */

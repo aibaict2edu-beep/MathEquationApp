@@ -150,7 +150,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v26</span>
+    <span style="font-size:12px;opacity:.85">試作版 v27</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -434,6 +434,7 @@
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
+document.body.classList.toggle("wide", window.innerWidth >= 900); // 最初の描画の前にレイアウトを決める(拡大前は倍率1)
 
 /* ============ 手書きキャンバス ============ */
 const pad = $("pad"), pctx = pad.getContext("2d");
@@ -1226,6 +1227,7 @@ let gctx = gc.getContext("2d");
 let view = { xmin: -10, xmax: 10, ymin: -10, ymax: 10 };
 let fn = null, fn2 = null, region = null, info1 = null, info2 = null;
 let icpt = [], diffPt = null;
+let cn = [null, null]; // 円・楕円・双曲線(式1・式2)
 
 function setupGraph() {
   const dpr = window.devicePixelRatio || 1;
@@ -1401,6 +1403,7 @@ function drawGraph() {
   drawCoefGhost(X, Y, W, H);
   if (fn) drawCurve(fn, fcol[1], X, Y, W, H, isTan(info1));
   if (fn2 && useG()) drawCurve(fn2, fcol[2], X, Y, W, H, isTan(info2));
+  cn.forEach((q, i) => { if (q) drawConic(q, fcol[i + 1], X, Y, W, H); });
   drawCoefMarks(X, Y, W, H);
   drawDots(X, Y, W, H);
   drawDiffMark(X, Y, W, H);
@@ -1433,6 +1436,215 @@ function autoY() {
   syncInputs(); refreshAll();
 }
 
+/*CONIC_START*/
+/* ============ 円・楕円・双曲線(2次曲線 Ax²+Bxy+Cy²+Dx+Ey+F=0) ============ */
+function conicFitFn(g) { // g(x,y) から係数を求める。2次式でなければ null
+  const pts = [];
+  for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) pts.push([i * 0.7 + 0.13, j * 0.9 - 0.21]);
+  const bas = (x, y) => [x * x, x * y, y * y, x, y, 1];
+  const N = Array.from({ length: 6 }, () => new Array(6).fill(0)), r = new Array(6).fill(0), vals = [];
+  for (const [x, y] of pts) {
+    const v = g(x, y); if (!isFinite(v)) return null; vals.push(v);
+    const b = bas(x, y);
+    for (let i = 0; i < 6; i++) { r[i] += b[i] * v; for (let j = 0; j < 6; j++) N[i][j] += b[i] * b[j]; }
+  }
+  const c = solveLin(N, r.slice()); if (!c) return null;
+  let mx = 0, sc = 1;
+  vals.forEach((v, k) => { const b = bas(pts[k][0], pts[k][1]); let s = 0; for (let i = 0; i < 6; i++) s += c[i] * b[i]; mx = Math.max(mx, Math.abs(s - v)); sc = Math.max(sc, Math.abs(v)); });
+  if (mx > 1e-7 * sc) return null;
+  let big = 0; c.forEach(v => { if (Math.abs(v) > Math.abs(big)) big = v; });
+  if (Math.abs(big) < 1e-12) return null;
+  const u = c.map(v => { const w = v / big; return Math.abs(w) < 1e-9 ? 0 : w; });
+  if (u[0] === 0 && u[1] === 0 && u[2] === 0) return null; // 2次の項がない(直線)
+  const qs = u.map(v => qFromFloat(v, 1000, 1e-8));
+  let co, ex = qs.every(q => q);
+  if (ex) {
+    let L = 1; qs.forEach(q => { L = lcm(L, q.d); });
+    co = qs.map(q => q.n * (L / q.d));
+    const G = gcdAll(co) || 1; co = co.map(v => v / G);
+  } else co = u.slice();
+  const first = co[0] !== 0 ? co[0] : (co[1] !== 0 ? co[1] : co[2]);
+  if (first < 0) co = co.map(v => -v || 0);
+  return { A: co[0], B: co[1], C: co[2], D: co[3], E: co[4], F: co[5], ex };
+}
+function conicVal(c, x, y) { return c.A * x * x + c.B * x * y + c.C * y * y + c.D * x + c.E * y + c.F; }
+function conicClass(c) {
+  const sc = Math.max(1, Math.abs(c.A), Math.abs(c.B), Math.abs(c.C), Math.abs(c.D), Math.abs(c.E), Math.abs(c.F));
+  const disc = c.B * c.B - 4 * c.A * c.C;
+  const det = c.A * (c.C * c.F - c.E * c.E / 4) - (c.B / 2) * (c.B / 2 * c.F - c.E * c.D / 4) + (c.D / 2) * (c.B * c.E / 4 - c.C * c.D / 2);
+  const tiny = 1e-9 * sc * sc * sc;
+  if (Math.abs(disc) < 1e-9 * sc * sc) return { kind: "parabola", name: "放物線" };
+  if (Math.abs(det) < tiny) return { kind: "degenerate", name: disc < 0 ? "1点" : "交わる2直線" };
+  if (disc < 0) {
+    if (det * (c.A + c.C) > 0) return { kind: "empty", name: "図形なし(実数の点がない)" };
+    return Math.abs(c.B) < 1e-9 * sc && Math.abs(c.A - c.C) < 1e-9 * sc ? { kind: "circle", name: "円" } : { kind: "ellipse", name: "楕円" };
+  }
+  return { kind: "hyperbola", name: "双曲線" };
+}
+function conicCenter(c) { // 中心(放物線は null)
+  const det = 4 * c.A * c.C - c.B * c.B;
+  if (Math.abs(det) < 1e-12) return null;
+  return { x: (-2 * c.C * c.D + c.B * c.E) / det, y: (-2 * c.A * c.E + c.B * c.D) / det };
+}
+function conicBBox(c) { // 楕円の外接長方形
+  const o = conicCenter(c); if (!o) return null;
+  const Fc = conicVal(c, o.x, o.y);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let k = 0; k < 360; k++) {
+    const t = k * Math.PI / 180, dx = Math.cos(t), dy = Math.sin(t);
+    const q = c.A * dx * dx + c.B * dx * dy + c.C * dy * dy;
+    if (q === 0) return null; const r2 = -Fc / q; if (!(r2 > 0)) return null; const r = Math.sqrt(r2);
+    x0 = Math.min(x0, o.x + r * dx); x1 = Math.max(x1, o.x + r * dx); y0 = Math.min(y0, o.y + r * dy); y1 = Math.max(y1, o.y + r * dy);
+  }
+  return { x0, x1, y0, y1 };
+}
+function conicSegs(c, view, W, H, cell) { // 曲線を短い線分に分ける(画面の座標)
+  cell = cell || 5;
+  const nx = Math.ceil(W / cell), ny = Math.ceil(H / cell), segs = [];
+  const sx = (view.xmax - view.xmin) / W, sy = (view.ymax - view.ymin) / H;
+  const val = (i, j) => conicVal(c, view.xmin + i * cell * sx, view.ymax - j * cell * sy);
+  let prev = [];
+  for (let i = 0; i <= nx; i++) prev.push(val(i, 0));
+  for (let j = 0; j < ny; j++) {
+    const cur = [];
+    for (let i = 0; i <= nx; i++) cur.push(val(i, j + 1));
+    for (let i = 0; i < nx; i++) {
+      const v00 = prev[i], v10 = prev[i + 1], v11 = cur[i + 1], v01 = cur[i]; // 左上・右上・右下・左下
+      const px = i * cell, py = j * cell, pts = [];
+      const cross = (a, b, xa, ya, xb, yb) => { if ((a > 0) !== (b > 0)) { const t = a / (a - b); return [xa + (xb - xa) * t, ya + (yb - ya) * t]; } return null; };
+      const T = cross(v00, v10, px, py, px + cell, py), R = cross(v10, v11, px + cell, py, px + cell, py + cell);
+      const B = cross(v01, v11, px, py + cell, px + cell, py + cell), L = cross(v00, v01, px, py, px, py + cell);
+      [T, R, B, L].forEach((p, k) => { if (p) pts.push({ p, k }); });
+      if (pts.length === 2) segs.push([pts[0].p[0], pts[0].p[1], pts[1].p[0], pts[1].p[1]]);
+      else if (pts.length === 4) {
+        const mid = conicVal(c, view.xmin + (i + 0.5) * cell * sx, view.ymax - (j + 0.5) * cell * sy);
+        if ((mid > 0) === (v00 > 0)) { segs.push([T[0], T[1], R[0], R[1]]); segs.push([B[0], B[1], L[0], L[1]]); }
+        else { segs.push([T[0], T[1], L[0], L[1]]); segs.push([R[0], R[1], B[0], B[1]]); }
+      }
+    }
+    prev = cur;
+  }
+  return segs;
+}
+function conicAsymptotes(c) { // 双曲線の漸近線 [{x,y,m}] または縦線 {x,vert:true}
+  const o = conicCenter(c); if (!o) return [];
+  const res = [];
+  if (Math.abs(c.C) < 1e-12) { res.push({ x: o.x, y: o.y, vert: true }); const m = -c.A / c.B; res.push({ x: o.x, y: o.y, m }); }
+  else { const D = c.B * c.B - 4 * c.A * c.C; if (D > 0) [(-c.B + Math.sqrt(D)) / (2 * c.C), (-c.B - Math.sqrt(D)) / (2 * c.C)].forEach(m => res.push({ x: o.x, y: o.y, m })); }
+  return res;
+}
+function conicProject(c, x, y) { // 点 (x,y) から曲線へ近づける
+  const sc = Math.max(1, Math.abs(c.F), Math.abs(c.A), Math.abs(c.C));
+  for (let k = 0; k < 60; k++) {
+    const F = conicVal(c, x, y), Fx = 2 * c.A * x + c.B * y + c.D, Fy = c.B * x + 2 * c.C * y + c.E, n2 = Fx * Fx + Fy * Fy;
+    if (n2 < 1e-18) return null;
+    if (Math.abs(F) < 1e-13 * sc) break;
+    x -= F * Fx / n2; y -= F * Fy / n2;
+  }
+  return Math.abs(conicVal(c, x, y)) < 1e-8 * sc ? { x, y } : null;
+}
+function quadRoots(a, b, c0) { // a t² + b t + c0 = 0 の実数解
+  const e = 1e-12 * (Math.abs(a) + Math.abs(b) + Math.abs(c0) + 1);
+  if (Math.abs(a) < e) return Math.abs(b) < e ? [] : [-c0 / b];
+  const d = b * b - 4 * a * c0; if (d < -1e-12 * (b * b + Math.abs(4 * a * c0) + 1)) return [];
+  const s = Math.sqrt(Math.max(0, d)); return s === 0 ? [-b / (2 * a)] : [(-b + s) / (2 * a), (-b - s) / (2 * a)];
+}
+const conicYs = (c, x) => quadRoots(c.C, c.B * x + c.E, c.A * x * x + c.D * x + c.F);
+const conicXs = (c, y) => quadRoots(c.A, c.B * y + c.D, c.C * y * y + c.E * y + c.F);
+function isNiceNum(v) { return !!qFromFloat(v, 12, 1e-9); }
+function conicSnap(c, p, ppx, ppy) { // 切りのよい点(整数・分数・切片・頂点)に吸着。なければ元の点
+  const cands = [];
+  const add = (x, y, pen) => { if (isFinite(x) && isFinite(y) && Math.abs(conicVal(c, x, y)) < 1e-7 * (1 + Math.abs(c.F))) cands.push({ x, y, pen }); };
+  [1, 2].forEach(k => {
+    const cx = Math.round(p.x * k) / k; conicYs(c, cx).forEach(y => add(cx, y, isNiceNum(y) ? 0 : 7 + k));
+    const cy = Math.round(p.y * k) / k; conicXs(c, cy).forEach(x => add(x, cy, isNiceNum(x) ? 0 : 7 + k));
+  });
+  conicXs(c, 0).forEach(x => add(x, 0, 0)); conicYs(c, 0).forEach(y => add(0, y, 0));
+  if (Math.abs(c.B) < 1e-12) { // 軸に平行な接線の点(頂点など)
+    if (c.A !== 0) { const x0 = -c.D / (2 * c.A); conicYs(c, x0).forEach(y => add(x0, y, 0)); }
+    if (c.C !== 0) { const y0 = -c.E / (2 * c.C); conicXs(c, y0).forEach(x => add(x, y0, 0)); }
+  }
+  let best = null, bd = 18;
+  cands.forEach(q => { const d = Math.hypot((q.x - p.x) * ppx, (q.y - p.y) * ppy) + q.pen; if (d < bd) { bd = d; best = q; } });
+  if (best) return { x: Math.abs(best.x) < 1e-12 ? 0 : best.x, y: Math.abs(best.y) < 1e-12 ? 0 : best.y };
+  return p;
+}
+function numTex(v) { // 分数・√n・小数
+  if (Math.abs(v) < 1e-12) return "0";
+  const q = qFromFloat(v, 200, 1e-9); if (q) return texQ(q);
+  const q2 = qFromFloat(v * v, 1, 1e-9); if (q2 && q2.n > 0 && q2.d === 1) return (v < 0 ? "-" : "") + "\\sqrt{" + q2.n + "}";
+  return String(+v.toPrecision(5));
+}
+function lineEqTex(a, b, c0) { // a(x-x0)+... 整数・分数係数 a x + b y + c = 0 → TeX
+  const L = lcm(lcm(a.d, b.d), c0.d), ai = a.n * (L / a.d), bi = b.n * (L / b.d), ci = c0.n * (L / c0.d);
+  const G = gcdAll([ai, bi, ci]) || 1; let A = ai / G, B = bi / G, C = ci / G;
+  if (A === 0) return "y=" + texQ(Q(-C, B));
+  if (B === 0) return "x=" + texQ(Q(-C, A));
+  if (A < 0 || (A === 0 && B < 0)) { A = -A; B = -B; C = -C; }
+  const term = (k, v, first) => { if (k === 0) return ""; const s = k < 0 ? "-" : (first ? "" : "+"); const m = Math.abs(k); return s + (v && m === 1 ? "" : String(m)) + v; };
+  const t1 = term(A, "x", true), t2 = term(B, "y", t1 === ""), t3 = term(C, "", t1 === "" && t2 === "");
+  return t1 + t2 + t3 + "=0";
+}
+function conicDeriv(c, x, y) { // 点 (x,y) での接線と dy/dx
+  const Fx = 2 * c.A * x + c.B * y + c.D, Fy = c.B * x + 2 * c.C * y + c.E;
+  const sc = 1 + Math.abs(Fx) + Math.abs(Fy);
+  if (Math.abs(Fx) < 1e-9 * sc && Math.abs(Fy) < 1e-9 * sc) return { ok: false, msg: "この点では接線が定まりません(とがった点)" };
+  const xTex = numTex(x), yTex = numTex(y), vertical = Math.abs(Fy) < 1e-9 * sc;
+  const out = { ok: true, conic: true, x, y, xTex, yTex, vertical, y_: y };
+  const qx = qFromFloat(x, 200, 1e-9), qy = qFromFloat(y, 200, 1e-9);
+  let lineTex = null;
+  if (c.ex && qx && qy) {
+    const fx = qAdd(qMul(Q(2 * c.A, 1), qx), qAdd(qMul(Q(c.B, 1), qy), Q(c.D, 1)));
+    const fy = qAdd(qMul(Q(c.B, 1), qx), qAdd(qMul(Q(2 * c.C, 1), qy), Q(c.E, 1)));
+    const c0 = qSub(qZero(), qAdd(qMul(fx, qx), qMul(fy, qy)));
+    lineTex = lineEqTex(fx, fy, c0);
+    if (!vertical) { const m = qDiv(qSub(qZero(), fx), fy); out.m = qNum(m); out.mTex = texQ(m); }
+  }
+  if (!vertical && out.m === undefined) { out.m = -Fx / Fy; if (Math.abs(out.m) < 1e-9) out.m = 0; out.mTex = out.m === 0 ? "0" : String(+out.m.toPrecision(5)); }
+  if (vertical) { out.m = Infinity; out.mTex = ""; }
+  out.lineTex = lineTex;
+  return out;
+}
+/*CONIC_END*/
+
+function isImplicitEq(src) { // y=f(x) 以外の「=」を含む式
+  const s = normalizeInput(src);
+  if (!s.includes("=")) return false;
+  const m = /^\s*(?:y|f\s*\(\s*x\s*\))\s*=([^=]*)$/.exec(s);
+  if (m && !/(?<![a-zA-Z\\])y(?![a-zA-Z])/.test(m[1])) return false;
+  return true;
+}
+function conicCompile(src) {
+  const s = normalizeInput(src).replace(/\\left|\\right|\\displaystyle|\\,|\;|\\:|\\!|\\quad|\\qquad|\\ /g, " ");
+  const parts = s.split("=");
+  if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) throw new Error("「左辺=右辺」の形で入力してください");
+  const fix = e => e.replace(/(?<![a-zA-Z])y\s*\(/g, "y*(").replace(/\bxy\b/g, "x*y").replace(/(\))\s*([xy])\b/g, "$1*$2");
+  const expr = "(" + fix(latexToExpr(parts[0])) + ")-(" + fix(latexToExpr(parts[1])) + ")";
+  if (!/(?<![a-zA-Z])y(?![a-zA-Z])/.test(expr)) throw new Error("y を含む式にしてください");
+  const code = math.parse(expr).compile();
+  const g = (x, y) => { const v = code.evaluate({ x, y }); return typeof v === "number" ? v : (v && typeof v.toNumber === "function" ? v.toNumber() : NaN); };
+  const c = conicFitFn(g);
+  if (!c) throw new Error("円・楕円・双曲線・放物線(x と y の2次式)の形のみ対応しています");
+  const cl = conicClass(c);
+  return { c, kind: cl.kind, name: cl.name };
+}
+function drawConic(q, color, X, Y, W, H) {
+  if (q.kind === "empty") return;
+  const segs = conicSegs(q.c, view, W, H, 5);
+  if (q.kind === "hyperbola") { // 漸近線(点線)
+    gctx.save(); gctx.setLineDash([7, 6]); gctx.strokeStyle = "#9aa5b8"; gctx.lineWidth = 1.5;
+    conicAsymptotes(q.c).forEach(a => {
+      gctx.beginPath();
+      if (a.vert) { gctx.moveTo(X(a.x), 0); gctx.lineTo(X(a.x), H); }
+      else { gctx.moveTo(X(view.xmin), Y(a.y + a.m * (view.xmin - a.x))); gctx.lineTo(X(view.xmax), Y(a.y + a.m * (view.xmax - a.x))); }
+      gctx.stroke();
+    });
+    gctx.restore();
+  }
+  gctx.save(); gctx.strokeStyle = color; gctx.lineWidth = (+$("curveW").value || 2.5) * ZF; gctx.lineCap = "round";
+  gctx.beginPath(); segs.forEach(s => { gctx.moveTo(s[0], s[1]); gctx.lineTo(s[2], s[3]); }); gctx.stroke(); gctx.restore();
+}
+
 /* ============ 式のコンパイル ============ */
 function compileLatex(src) {
   src = normalizeInput(src);
@@ -1453,18 +1665,38 @@ function drawFromInput() {
   const infoLines = [];
   const src1 = $("latex").value.trim();
   if (!src1) { $("graphMsg").textContent = "式1を入力してください"; drawGraph(); refreshRegionUI(); return; }
-  try { info1 = compileLatex(src1); fn = info1.f; infoLines.push("式1: y = " + info1.expr); }
-  catch (e) { $("graphMsg").textContent = "式1がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; $("exprInfo").textContent = ""; drawGraph(); refreshRegionUI(); return; }
-  if (regionOn()) {
+  cn = [null, null];
+  const useRegion = regionOn();
+  if (isImplicitEq(src1)) {
+    try { cn[0] = conicCompile(src1); infoLines.push("式1: " + cn[0].name); }
+    catch (e) { $("graphMsg").textContent = "式1がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; $("exprInfo").textContent = ""; drawGraph(); refreshRegionUI(); return; }
+  } else {
+    try { info1 = compileLatex(src1); fn = info1.f; infoLines.push("式1: y = " + info1.expr); }
+    catch (e) { $("graphMsg").textContent = "式1がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; $("exprInfo").textContent = ""; drawGraph(); refreshRegionUI(); return; }
+  }
+  if (useRegion) {
     if (useG()) {
       const src2 = $("latex2").value.trim();
       if (!src2) { $("graphMsg").textContent = "式2を入力してください(式1だけ表示中)"; $("graphMsg").className = "msg err"; }
+      else if (isImplicitEq(src2)) {
+        try { cn[1] = conicCompile(src2); infoLines.push("式2: " + cn[1].name); }
+        catch (e) { $("graphMsg").textContent = "式2がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; }
+      }
       else {
         try { info2 = compileLatex(src2); fn2 = info2.f; infoLines.push("式2: y = " + info2.expr); }
         catch (e) { $("graphMsg").textContent = "式2がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; }
       }
     } else { fn2 = () => 0; info2 = { rhs: "0" }; }
+    if (cn[0] || cn[1]) { $("graphMsg").textContent = "円・楕円・双曲線の面積(積分)は次の段階で対応します。いまは描画と微分のみです"; $("graphMsg").className = "msg"; }
   }
+  { const el = cn.find(q => q && (q.kind === "ellipse" || q.kind === "circle"));
+    if (el && isInitialView()) {
+      const bb = conicBBox(el.c);
+      if (bb && Math.max(Math.abs(bb.x0), Math.abs(bb.x1), Math.abs(bb.y0), Math.abs(bb.y1)) > 8) {
+        const m = Math.max(Math.abs(bb.x0), Math.abs(bb.x1), Math.abs(bb.y0), Math.abs(bb.y1)) * 1.25;
+        view = { xmin: -m, xmax: m, ymin: -m, ymax: m }; applyEqual(); syncInputs();
+      }
+    } }
   $("exprInfo").textContent = ""; // 正常時は表示しない(エラーはgraphMsgに出る)
   const trigNow = hasTrig(); // 三角関数を初めて描くときは、範囲が初期値のままなら -2π〜2π に合わせる
   if (trigNow && !lastTrig && axisKind() !== "num" && isInitialView()) { view = defaultView(); applyEqual(); syncInputs(); }
@@ -1856,6 +2088,10 @@ function drawDots(X, Y, W, H) {
 }
 function drawDiffMark(X, Y, W, H) {
   if (!diffPt || !diffPt.ok) return;
+  if ($("showTan").checked && diffPt.conic && diffPt.vertical) {
+    gctx.save(); gctx.strokeStyle = "#e67e22"; gctx.lineWidth = 2.5; gctx.beginPath();
+    gctx.moveTo(X(diffPt.x), 0); gctx.lineTo(X(diffPt.x), H); gctx.stroke(); gctx.restore();
+  }
   if ($("showTan").checked && isFinite(diffPt.m)) {
     gctx.save(); gctx.strokeStyle = "#e67e22"; gctx.lineWidth = 2.5; gctx.beginPath();
     gctx.moveTo(0, Y(diffPt.y + diffPt.m * (view.xmin - diffPt.x)));
@@ -1874,6 +2110,17 @@ function updateDiffUI() {
     return;
   }
   const m = diffPt.m;
+  if (diffPt.conic) {
+    const pt = "\\left(" + diffPt.xTex + ",\\ " + diffPt.yTex + "\\right)";
+    let t1 = diffPt.vertical ? "\\text{接線は}\\ y\\text{軸に平行(傾きなし)}" : "\\frac{dy}{dx}=" + diffPt.mTex;
+    arrow.textContent = diffPt.vertical ? "↕" : (m > 0 ? "↗" : m < 0 ? "↘" : "0"); arrow.style.color = diffPt.vertical ? "#555" : (m > 0 ? "#d62d2d" : m < 0 ? "#2457d6" : "#555");
+    info.innerHTML = "<div></div><div></div><div></div>";
+    const R = (el, tx) => { try { katex.render(tx, el, { throwOnError: true, strict: "ignore" }); } catch (e) { el.textContent = tx; } };
+    R(info.children[0], "\\text{点}\\ " + pt);
+    R(info.children[1], t1);
+    if (diffPt.lineTex) R(info.children[2], "\\text{接線}\\ " + diffPt.lineTex);
+    return;
+  }
   if (m > 0) { arrow.textContent = "↗"; arrow.style.color = "#d62d2d"; }
   else if (m < 0) { arrow.textContent = "↘"; arrow.style.color = "#2457d6"; }
   else { arrow.textContent = "0"; arrow.style.color = "#555"; }
@@ -1882,11 +2129,27 @@ function updateDiffUI() {
   try { katex.render(tex, info, { throwOnError: true, strict: "ignore" }); } catch (e) { info.textContent = name + "'(x) = " + diffPt.mTex; }
 }
 function diffFail(msg) { diffPt = { ok: false, msg }; updateDiffUI(); drawGraph(); }
+function conicTapBest(px, py) {
+  let best = null;
+  const d = px2data(px, py), r = gc.getBoundingClientRect();
+  const ppx = r.width / (view.xmax - view.xmin), ppy = r.height / (view.ymax - view.ymin);
+  cn.forEach((q, i) => {
+    if (!q || q.kind === "empty") return;
+    const pr = conicProject(q.c, d.x, d.y); if (!pr) return;
+    const dist = Math.hypot((pr.x - d.x) * ppx, (pr.y - d.y) * ppy);
+    if (dist > 45 || (best && dist >= best.dist)) return;
+    const sn = conicSnap(q.c, pr, ppx, ppy);
+    const info = conicDeriv(q.c, sn.x, sn.y);
+    best = { dist, info: info.ok ? { ...info, n: i + 1 } : info };
+  });
+  return best;
+}
 function diffTap(px, py) {
   const cands = [];
   if (fn) cands.push({ f: fn, n: 1, col: fcol[1] });
   if (fn2 && useG()) cands.push({ f: fn2, n: 2, col: fcol[2] });
-  if (!cands.length) { diffFail("先にグラフを描いてください"); return; }
+  const cb = conicTapBest(px, py);
+  if (!cands.length && !cn.some(q => q)) { diffFail("先にグラフを描いてください"); return; }
   const d = px2data(px, py);
   let best = null;
   cands.forEach(c => {
@@ -1895,7 +2158,8 @@ function diffTap(px, py) {
     const dist = Math.abs(data2px(d.x, y).y - py);
     if (!best || dist < best.dist) best = { ...c, dist };
   });
-  if (!best || best.dist > 45) { diffFail("グラフの近くをタップしてください"); return; }
+  if (cb && (!best || cb.dist < best.dist)) { diffPt = cb.info; updateDiffUI(); drawGraph(); return; }
+  if (!best || best.dist > 45) { diffFail(cb ? cb.info.msg : "グラフの近くをタップしてください"); return; }
   const f = best.f;
   const dnum = x => { const h = 1e-6 * (1 + Math.abs(x)); return (safeCall(f, x + h) - safeCall(f, x - h)) / (2 * h); };
   const cx = findRoots(dnum, view.xmin, view.xmax, 2000); // 傾き0(頂点など)

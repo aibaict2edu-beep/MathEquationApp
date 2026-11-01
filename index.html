@@ -77,6 +77,9 @@
   #result.empty { display:none; }
   #stepsBar { display:block; font-size:14px; margin-top:4px; }
   #stepsBar[hidden], #resSteps[hidden] { display:none; }
+  #resSteps .stephead { font-weight:700; font-size:14px; margin-top:10px; padding-top:6px; border-top:1px solid var(--line); }
+  #resSteps .stephead:first-child { border-top:none; margin-top:2px; }
+  #resSteps .stepsub { font-weight:600; font-size:13px; margin-top:8px; color:var(--accent); }
   #resSteps .stepcap { font-size:12.5px; color:var(--sub); margin-top:6px; }
   #resSteps .stepmsg { font-size:13px; color:var(--sub); margin-top:4px; }
   #resSteps .katex-display { margin:2px 0; text-align:left; }
@@ -137,12 +140,23 @@
   #selBox { position:absolute; z-index:6; border:2px dashed #2457d6; background:rgba(36,87,214,0.12); pointer-events:none; }
   #selBox[hidden] { display:none; }
   #zoomBack { min-height:42px; }
+
+  /* ===== v19: 係数モード ===== */
+  .crow { display:flex; align-items:center; gap:6px; margin:6px 0; }
+  .crow .cname { width:22px; font-weight:700; font-size:17px; text-align:center; }
+  .crow button { width:44px; min-height:44px; padding:0; font-size:22px; line-height:1; flex:none; }
+  .crow input[type=range] { flex:1; min-width:60px; height:32px; }
+  .crow .cnum { width:68px; text-align:center; font-size:16px; }
+  #coefFormula { min-height:50px; font-size:1.3em; justify-content:center; }
+  #coefExplain { margin-top:8px; padding:8px 10px; background:#f3f6fd; border-radius:10px; font-size:14px; line-height:1.6; }
+  #coefExplain .chg { color:#b45f06; font-weight:600; }
+  #coefExplain div { margin:2px 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v18</span>
+  <span style="font-size:12px;opacity:.85">試作版 v20</span>
 </header>
 
 <main id="app">
@@ -179,6 +193,7 @@
       <div class="tabbar">
         <button class="tabbtn on" data-tab="draw">手書き</button>
         <button class="tabbtn" data-tab="analysis">解析</button>
+        <button class="tabbtn" data-tab="coef">係数</button>
         <button class="tabbtn" data-tab="view">表示</button>
         <button class="tabbtn" data-tab="settings">設定</button>
       </div>
@@ -244,6 +259,35 @@
           <div class="msg" id="interList"></div>
           <div class="msg" id="regionMsg"></div>
           <div class="msg">面積の式は、グラフの下に表示されます。</div>
+        </div>
+      </div>
+
+      <!-- タブ: 係数 -->
+      <div class="tabpanel" data-tab="coef" hidden>
+        <h2>係数を変えて、グラフの変化を見る</h2>
+        <label style="font-size:15px;color:var(--ink)"><input type="checkbox" id="coefMode" style="width:20px;height:20px"> 係数モード(式1を係数で動かす)</label>
+        <div id="coefPanel" hidden>
+          <div class="row">
+            <label>式の種類:
+              <select id="coefKind">
+                <option value="1">1次 y=ax+b</option>
+                <option value="2" selected>2次 y=ax²+bx+c</option>
+                <option value="3">3次 y=ax³+bx²+cx+d</option>
+              </select>
+            </label>
+            <label>刻み:
+              <select id="coefStep"><option value="0.1">0.1</option><option value="0.5">0.5</option><option value="1" selected>1</option></select>
+            </label>
+          </div>
+          <div id="coefFormula" class="preview"></div>
+          <div id="coefRows"></div>
+          <div class="row">
+            <label><input type="checkbox" id="coefGhost" checked> 前の線を薄く残す</label>
+            <label><input type="checkbox" id="coefMarks" checked> 特徴の点</label>
+          </div>
+          <div class="row"><button id="coefReset">初期値に戻す</button></div>
+          <div id="coefExplain"></div>
+          <div class="msg" id="coefMsg"></div>
         </div>
       </div>
 
@@ -1008,6 +1052,111 @@ function piTexQ(q) { // \frac{3\pi}{2} の形
 }
 function degVal(x) { const d = x * 180 / Math.PI, r = Math.round(d); return Math.abs(d - r) < 1e-7 * (1 + Math.abs(d)) ? r : null; }
 function fmtPiX(x) { const s = xFormatter ? xFormatter(x) : null; return s !== null && s !== undefined ? s : fmtX(x); }
+
+// ---- 交点を求める過程(多項式のとき) ----
+function gcdAll(a) { return a.reduce((g, v) => gcd(g, Math.abs(v)), 0); }
+function ipTex(c) { return polyTexX(c.map(v => Q(v, 1)), "x"); }
+function linTex(q, p) { const qs = q === 1 ? "" : String(q); return p === 0 ? qs + "x" : qs + "x" + (p > 0 ? "-" + p : "+" + (-p)); }
+function divisorsOf(n) { n = Math.abs(n); const r = []; for (let i = 1; i * i <= n; i++) if (n % i === 0) { r.push(i); if (i * i !== n) r.push(n / i); } return r.sort((a, b) => a - b); }
+function addRoot(roots, tex, val) { if (!roots.some(r => Math.abs(r.val - val) < 1e-9)) roots.push({ tex, val }); }
+function ipEvalAt(c, p, q) { const d = c.length - 1; let s = 0; for (let k = 0; k <= d; k++) s += c[k] * Math.pow(p, k) * Math.pow(q, d - k); return s; }
+function ipDivLin(c, q, p) { // 整数係数の多項式 c(低次→高次)を (qx−p) で割った商(整数)
+  const d = c.length - 1, a = c.slice().reverse(), b = []; let prev = Q(0, 1);
+  for (let i = 0; i < d; i++) { const v = qDiv(qAdd(Q(a[i], 1), qMul(Q(p, 1), prev)), Q(q, 1)); b.push(v); prev = v; }
+  return b.map(v => v.n / v.d).reverse();
+}
+function solveQuadSteps(c, st, roots) { // c=[c0,c1,c2] 整数係数
+  let C0 = c[0], B = c[1], A = c[2];
+  if (A < 0) { A = -A; B = -B; C0 = -C0; }
+  const par = v => v < 0 ? "\\left(" + v + "\\right)" : String(v);
+  const D = B * B - 4 * A * C0;
+  if (D < 0) { st.push({ cap: "判別式 D=b²−4ac を計算する。D<0 なので、この2次方程式に実数解はない", tex: "D=" + par(B) + "^{2}-4\\cdot" + par(A) + "\\cdot" + par(C0) + "=" + D }); return; }
+  const s = Math.round(Math.sqrt(D));
+  if (s * s === D) {
+    const r1 = Q(-B - s, 2 * A), r2 = Q(-B + s, 2 * A), k = qDiv(Q(A, 1), Q(r1.d * r2.d, 1));
+    const kt = (k.n === 1 && k.d === 1) ? "" : texQ(k);
+    const f1 = linTex(r1.d, r1.n), f2 = linTex(r2.d, r2.n);
+    const pw = f => /[+-]/.test(f) ? "\\left(" + f + "\\right)" : f;
+    const body = D === 0 ? pw(f1) + "^{2}" : pw(f1) + pw(f2);
+    st.push({ cap: "因数分解する", tex: ipTex([C0, B, A]) + "=" + kt + body + "=0" });
+    addRoot(roots, texQ(r1), qNum(r1)); if (D > 0) addRoot(roots, texQ(r2), qNum(r2));
+    return;
+  }
+  const sq = quadSurd([Q(C0, 1), Q(B, 1), Q(A, 1)]);
+  st.push({ cap: "因数分解できないので、解の公式を使う", tex: "x=\\frac{-b\\pm\\sqrt{b^{2}-4ac}}{2a}" });
+  st.push({ cap: "a=" + A + ", b=" + B + ", c=" + C0 + " を代入する", tex: "x=\\frac{-" + par(B) + "\\pm\\sqrt{" + par(B) + "^{2}-4\\cdot" + par(A) + "\\cdot" + par(C0) + "}}{2\\cdot" + par(A) + "}" });
+  st.push({ cap: "計算する(判別式 D=" + D + ")", tex: "x=\\frac{" + (-B) + "\\pm\\sqrt{" + D + "}}{" + (2 * A) + "}" });
+  const lo = texSurd(sq.u, Q(-sq.w.n, sq.w.d), sq.m), hi = texSurd(sq.u, sq.w, sq.m);
+  st.push({ cap: "√ の中を簡単にして整理する", tex: "x=" + lo + ",\\ " + hi });
+  const uv = qNum(sq.u), wv = qNum(sq.w) * Math.sqrt(sq.m);
+  addRoot(roots, lo, uv - wv); addRoot(roots, hi, uv + wv);
+}
+// cf, cg: 式1・式2の係数(Q の配列)。F, G: 式の TeX。戻り値 {steps, roots, note}
+function interStepsTex(cf, cg, F, G, opt) {
+  opt = opt || {};
+  if (!cf || !cg) return null;
+  const n = Math.max(cf.length, cg.length); let H = [];
+  for (let i = 0; i < n; i++) H.push(qSub(cf[i] || qZero(), cg[i] || qZero()));
+  let deg = n - 1; while (deg > 0 && H[deg].n === 0) deg--; H = H.slice(0, deg + 1);
+  const st = [], roots = []; let note = null;
+  st.push({ cap: opt.first || "交点では y の値が等しいので、2つの式を等しいとおく", tex: F + "=" + G });
+  const norm = t => t.replace(/[\s{}]/g, "").replace(/\\left|\\right/g, "");
+  if (norm(F + "=" + G) !== norm(polyTexX(H, "x") + "=0")) st.push({ cap: G === "0" ? "左辺を展開して整理する" : "右辺を左辺に移して整理する", tex: polyTexX(H, "x") + "=0" }); // すでに整理済みなら省く
+  const number = () => { const m = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫"; st.forEach((s, i) => { s.cap = m[i] + " " + s.cap; }); };
+  if (deg === 0) {
+    st.push({ cap: H[0].n === 0 ? (opt.same || "x が消えて 0=0 となる。2つの式は同じで、すべての点で重なる") : (opt.none || "x が消えて成り立たない式になる。2つのグラフは交わらない"), tex: "" });
+    number(); return { steps: st, roots: [], note };
+  }
+  let L = 1; H.forEach(q => { L = lcm(L, q.d); });
+  let c = H.map(q => q.n * (L / q.d));
+  const ops = [];
+  if (L > 1) ops.push("両辺に " + L + " をかけて分数をなくす");
+  if (c[c.length - 1] < 0) { ops.push("両辺に −1 をかけて最高次の係数を正にする"); c = c.map(v => -v); }
+  const g = gcdAll(c); if (g > 1) { ops.push("両辺を " + g + " で割る"); c = c.map(v => v / g); }
+  if (ops.length) st.push({ cap: ops.join("。"), tex: ipTex(c) + "=0" });
+  if (deg === 1) {
+    const r = Q(-c[0], c[1]); st.push({ cap: "1次方程式を解く", tex: "x=" + texQ(r) }); addRoot(roots, texQ(r), qNum(r));
+  } else if (deg === 2) {
+    solveQuadSteps(c, st, roots);
+  } else if (deg === 3) {
+    if (c[0] === 0) {
+      st.push({ cap: "x でくくる", tex: "x\\left(" + ipTex([c[1], c[2], c[3]]) + "\\right)=0" });
+      addRoot(roots, "0", 0); solveQuadSteps([c[1], c[2], c[3]], st, roots);
+    } else {
+      let found = null;
+      const qs = divisorsOf(c[3]), ps = divisorsOf(c[0]);
+      outer: for (const q of qs) for (const p of ps) for (const sg of [1, -1]) {
+        if (gcd(p, q) !== 1) continue;
+        if (ipEvalAt(c, sg * p, q) === 0) { found = { p: sg * p, q }; break outer; }
+      }
+      if (!found) { note = "3次方程式で、有理数の解が見つからないため、交点は近似値で求めています"; number(); return { steps: st, roots: null, note }; }
+      const r = Q(found.p, found.q), lf = linTex(found.q, found.p);
+      st.push({ cap: "x=" + texQ(r) + " を代入すると 0 になるので、(" + lf.replace(/\\/g, "") + ") を因数にもつ(因数定理)", tex: polyTexX(c.map(v => Q(v, 1)), "\\left(" + texQ(r) + "\\right)") + "=0" });
+      const quad = ipDivLin(c, found.q, found.p);
+      st.push({ cap: "(" + lf + ") で割って因数分解する", tex: ipTex(c) + "=\\left(" + lf + "\\right)\\left(" + ipTex(quad) + "\\right)=0" });
+      addRoot(roots, texQ(r), qNum(r)); solveQuadSteps(quad, st, roots);
+    }
+  } else {
+    note = "4次以上の方程式は、交点を近似値で求めています"; number(); return { steps: st, roots: null, note };
+  }
+  roots.sort((a, b) => a.val - b.val);
+  if (roots.length) {
+    st.push({ cap: opt.last || "交点のx座標(小さい順)", tex: "x=" + roots.map(r => r.tex).join(",\\ ") });
+    if (opt.pts) st.push({ cap: opt.pts, tex: roots.map(r => "\\left(" + r.tex + ",\\ 0\\right)").join(",\\ ") });
+  } else st.push({ cap: opt.noRoot || "実数解がないので、2つのグラフは交わらない", tex: "" });
+  number();
+  return { steps: st, roots, note };
+}
+// y切片: x=0 を代入する
+function yIcptStepsTex(co) {
+  if (!co) return null;
+  const c0 = co[0] || qZero();
+  return [
+    { cap: "① x=0 を代入する", tex: "y=" + polyTexX(co, "\\left(0\\right)") },
+    { cap: "② 計算する", tex: "y=" + texQ(c0) },
+    { cap: "③ y切片", tex: "\\left(0,\\ " + texQ(c0) + "\\right)" }
+  ];
+}
 /*REGION_END*/
 
 /* ============ グラフ ============ */
@@ -1130,8 +1279,10 @@ function drawGraph() {
   // 領域 → 曲線 → 交点
   drawShade(X, Y, W, H);
   const isTan = inf => !!(inf && inf.expr && /\btan\(/.test(inf.expr));
+  drawCoefGhost(X, Y, W, H);
   if (fn) drawCurve(fn, fcol[1], X, Y, W, H, isTan(info1));
   if (fn2 && useG()) drawCurve(fn2, fcol[2], X, Y, W, H, isTan(info2));
+  drawCoefMarks(X, Y, W, H);
   drawDots(X, Y, W, H);
   drawDiffMark(X, Y, W, H);
   drawAnnotations(X, Y);
@@ -1266,7 +1417,13 @@ function computeRegion() {
 function decTex(v) { return String(+v.toPrecision(5)); }
 function renderResult() {
   const box = $("resMath"), wrapBox = $("result");
-  if (!regionOn() || !region || !region.ok || !info1 || !info2) { box.textContent = ""; wrapBox.classList.add("empty"); $("stepsBar").hidden = true; $("resSteps").hidden = true; return; }
+  if (!regionOn() || !region || !region.ok || !info1 || !info2) {
+    box.textContent = "";
+    const can = !!(fn && ($("showXi").checked || $("showYi").checked)); // 積分領域がなくても、切片の途中式を出せる
+    wrapBox.classList.toggle("empty", !can); $("stepsBar").hidden = !can;
+    if (can) renderSteps(); else $("resSteps").hidden = true;
+    return;
+  }
   wrapBox.classList.remove("empty"); $("stepsBar").hidden = false;
   const R = region, ex = R.exact;
   const texX = v => (xTexFormatter && xTexFormatter(v)) || decTex(v);
@@ -1298,21 +1455,58 @@ function renderResult() {
 function renderSteps() {
   const box = $("resSteps"), on = $("showSteps").checked;
   box.hidden = !on; box.innerHTML = "";
-  if (!on || !region || !region.ok) return;
+  if (!on) return;
   const msg = t => { const d = document.createElement("div"); d.className = "stepmsg"; d.textContent = t; box.appendChild(d); };
-  if (region.interior.length > 0) { msg("途中式は、区間の途中で2つのグラフが交わらない場合に表示します"); return; }
-  const st = stepsTex(region.exact, region.fTop);
-  if (!st) { msg("途中式は、多項式の式(2次の根号を含む場合も可)のときに表示します。この式では答えのみ表示しています"); return; }
-  st.forEach(s => {
+  const head = t => { const d = document.createElement("div"); d.className = "stephead"; d.textContent = t; box.appendChild(d); };
+  const sub = t => { const d = document.createElement("div"); d.className = "stepsub"; d.textContent = t; box.appendChild(d); };
+  const show = st => st.forEach(s => {
     const c = document.createElement("div"); c.className = "stepcap"; c.textContent = s.cap; box.appendChild(c);
+    if (!s.tex) return;
     const t = document.createElement("div"); box.appendChild(t);
     try { katex.render(s.tex, t, { displayMode: true, throwOnError: true, strict: "ignore" }); } catch (e) { t.textContent = s.tex; }
   });
+  if (region && region.ok) {
+    // 1) 交点を求める
+    head("【交点のx座標を求める】");
+    const ir = (fn && fn2 && info1 && info2) ? interStepsTex(fitPoly(fn), fitPoly(fn2), info1.rhs, info2.rhs) : null;
+    if (!ir) msg("交点の求め方は、多項式の式のときに表示します。この式では、グラフから近似値で求めています");
+    else { show(ir.steps); if (ir.note) msg(ir.note); }
+    // 2) 面積を求める
+    head("【面積を求める】");
+    if (region.interior.length > 0) msg("途中式は、区間の途中で2つのグラフが交わらない場合に表示します");
+    else {
+      const st = stepsTex(region.exact, region.fTop);
+      if (!st) msg("途中式は、多項式の式(2次の根号を含む場合も可)のときに表示します。この式では答えのみ表示しています");
+      else show(st);
+    }
+  }
+  // 3) x切片・y切片を求める
+  const doX = $("showXi").checked, doY = $("showYi").checked;
+  if (!(doX || doY)) return;
+  const curves = [];
+  if (fn && info1) curves.push({ name: "式1", f: fn, info: info1 });
+  if (regionOn() && fn2 && useG() && info2) curves.push({ name: "式2", f: fn2, info: info2 });
+  curves.forEach(c => {
+    head("【" + c.name + " の" + (doX && doY ? "x切片・y切片" : doX ? "x切片" : "y切片") + "を求める】");
+    const co = fitPoly(c.f);
+    if (doY) {
+      sub("y切片(y軸との交点)");
+      const ys = yIcptStepsTex(co);
+      if (ys) show(ys);
+      else { const v = safeCall(c.f, 0); msg(isFinite(v) ? "多項式ではないので、x=0 を代入した値(近似値)です: y=" + decTex(v) + "  →  (0, " + decTex(v) + ")" : "x=0 では値が定まらないので、y切片はありません"); }
+    }
+    if (doX) {
+      sub("x切片(x軸との交点)");
+      const xr = co ? interStepsTex(co, [qZero()], c.info.rhs, "0", { first: "x軸との交点では y=0 なので、y=0 とおく", last: "x切片のx座標(小さい順)", pts: "x切片(x軸との交点)", same: "x が消えて 0=0 となる。グラフは x軸と重なっている", none: "x が消えて成り立たない式になる。x軸と交わらないので、x切片はない", noRoot: "実数解がないので、x軸と交わらない(x切片はない)" }) : null;
+      if (!xr) msg("多項式ではないので、x切片は、グラフから近似値で求めています(sin など、切片が無数にある式もあります)");
+      else { show(xr.steps); if (xr.note) msg(xr.note); }
+    }
+  });
 }
 $("showSteps").addEventListener("change", renderSteps);
+["showXi", "showYi"].forEach(id => $(id).addEventListener("change", renderResult));
 
 /* ============ イベント ============ */
-$("btnGraph").onclick = drawFromInput;
 $("regionMode").addEventListener("change", () => { updateModeUI(); drawFromInput(); });
 $("regionType").addEventListener("change", () => { updateModeUI(); drawFromInput(); });
 document.querySelectorAll("input[name=ivm]").forEach(r => r.addEventListener("change", () => { updateIvUI(); refreshAll(); }));
@@ -1809,6 +2003,201 @@ document.querySelectorAll(".swb").forEach(b => b.addEventListener("click", () =>
   b.parentNode.querySelectorAll(".swb").forEach(x => x.classList.toggle("on", x === b));
   refreshAll();
 }));
+
+/* ============ 係数モード ============ */
+const COEF_NAMES = ["a", "b", "c", "d"];
+let coefVals = [1, 0, 0], coefKind = 2, coefLast = -1, coefPrevVal = 0, coefGhostVals = null, coefLastT = 0, coefBusy = false;
+function coefOn() { return $("coefMode").checked; }
+function coefDefaults(k) { return k === 1 ? [1, 0] : k === 2 ? [1, 0, 0] : [1, 0, 0, 0]; }
+const rnd4 = v => Math.round(v * 10000) / 10000;
+function coefAsc(vals) { return vals.slice().reverse(); } // 低次→高次
+function coefEval(vals, x) { let s = 0; for (let i = 0; i < vals.length; i++) s = s * x + vals[i]; return s; }
+function coefExprStr(vals) {
+  const d = vals.length - 1; let out = "";
+  vals.forEach((v, i) => {
+    v = rnd4(v); if (v === 0) return; const deg = d - i, av = Math.abs(v);
+    const t = ((av === 1 && deg > 0) ? "" : String(av)) + (deg === 0 ? "" : deg === 1 ? "x" : "x^" + deg);
+    out += (out === "" ? (v < 0 ? "-" : "") : (v < 0 ? "-" : "+")) + t;
+  });
+  return "y=" + (out || "0");
+}
+function coefTex(vals, hi) {
+  const d = vals.length - 1; let out = "";
+  vals.forEach((v, i) => {
+    v = rnd4(v); const deg = d - i;
+    if (v === 0 && i !== hi) return;
+    const av = Math.abs(v); let num = (av === 1 && deg > 0) ? "" : String(av);
+    if (i === hi) num = "\\textcolor{#e67e22}{" + (av === 1 && deg > 0 ? "1" : String(av)) + "}";
+    const t = num + (deg === 0 ? "" : deg === 1 ? "x" : "x^{" + deg + "}");
+    out += (out === "" ? (v < 0 ? "-" : "") : (v < 0 ? "-" : "+")) + t;
+  });
+  return "y=" + (out || "0");
+}
+function coefBuildRows() {
+  const box = $("coefRows"); box.innerHTML = "";
+  const n = coefKind + 1, st = coefStepV();
+  for (let i = 0; i < n; i++) {
+    const row = document.createElement("div"); row.className = "crow";
+    const lim = Math.max(5, Math.ceil(Math.abs(coefVals[i]) + 1));
+    row.innerHTML = '<span class="cname">' + COEF_NAMES[i] + '</span><button type="button" class="cm" aria-label="' + COEF_NAMES[i] + 'を小さく">−</button>' +
+      '<input type="range" min="' + (-lim) + '" max="' + lim + '" step="' + st + '" value="' + coefVals[i] + '">' +
+      '<button type="button" class="cp" aria-label="' + COEF_NAMES[i] + 'を大きく">＋</button>' +
+      '<input type="text" class="cnum" inputmode="decimal" value="' + rnd4(coefVals[i]) + '">';
+    box.appendChild(row);
+    const rg = row.querySelector("input[type=range]"), nm = row.querySelector(".cnum");
+    rg.addEventListener("input", () => coefSet(i, +rg.value));
+    nm.addEventListener("change", () => { const v = parseFloat(String(nm.value).replace(/[０-９．－]/g, ch => ({ "．": ".", "－": "-" }[ch] || String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)))); if (isFinite(v)) coefSet(i, v); else nm.value = rnd4(coefVals[i]); });
+    [[".cm", -1], [".cp", 1]].forEach(([sel, dir]) => {
+      const b = row.querySelector(sel); let t1 = null, t2 = null;
+      const stop = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
+      b.addEventListener("pointerdown", e => {
+        e.preventDefault(); coefSet(i, coefVals[i] + dir * coefStepV());
+        t1 = setTimeout(() => { t2 = setInterval(() => coefSet(i, coefVals[i] + dir * coefStepV()), 120); }, 400);
+      });
+      ["pointerup", "pointercancel", "pointerleave"].forEach(ev => b.addEventListener(ev, stop));
+    });
+  }
+}
+function coefRowsSync() {
+  const rows = $("coefRows").children;
+  for (let i = 0; i < rows.length; i++) {
+    const rg = rows[i].querySelector("input[type=range]"), nm = rows[i].querySelector(".cnum");
+    const lim = Math.max(5, Math.ceil(Math.abs(coefVals[i]) + 1));
+    rg.min = -lim; rg.max = lim; rg.value = coefVals[i]; nm.value = rnd4(coefVals[i]);
+  }
+}
+function coefStepV() { return +$("coefStep").value || 1; }
+function coefSet(i, v) {
+  v = rnd4(v);
+  if (v === coefVals[i]) return;
+  const now = Date.now();
+  if (now - coefLastT > 700) coefGhostVals = coefVals.slice(); // しばらく間があいたら、動かす前の線を基準として残す
+  coefLastT = now; coefLast = i; coefPrevVal = coefVals[i]; coefVals[i] = v;
+  coefRowsSync(); coefApply();
+}
+function coefApply() {
+  coefBusy = true;
+  try {
+    $("latex").value = coefExprStr(coefVals);
+    renderPreviews();
+    drawFromInput();
+  } finally { coefBusy = false; }
+  coefUpdateText();
+}
+function coefFeatures() { // 特徴の点(データ座標)
+  const v = coefVals, out = { pts: [], axisX: null };
+  if (coefKind === 1) {
+    out.pts.push({ x: 0, y: v[1], t: "y切片" });
+    if (v[0] !== 0) out.pts.push({ x: -v[1] / v[0], y: 0, t: "x切片" });
+  } else if (coefKind === 2) {
+    const [a, b, c] = v;
+    out.pts.push({ x: 0, y: c, t: "y切片" });
+    if (a !== 0) { const vx = -b / (2 * a); out.axisX = vx; out.pts.push({ x: vx, y: c - b * b / (4 * a), t: "頂点", main: true }); }
+  } else {
+    const [a, b, c, d] = v;
+    out.pts.push({ x: 0, y: d, t: "y切片" });
+    if (a !== 0) {
+      const Dp = 4 * b * b - 12 * a * c;
+      if (Dp > 0) [(-2 * b - Math.sqrt(Dp)) / (6 * a), (-2 * b + Math.sqrt(Dp)) / (6 * a)].forEach(x => {
+        const sec = 6 * a * x + 2 * b; out.pts.push({ x, y: coefEval(v, x), t: sec < 0 ? "極大" : "極小", main: true });
+      });
+      const ix = -b / (3 * a); out.pts.push({ x: ix, y: coefEval(v, ix), t: "変曲点" });
+    }
+  }
+  return out;
+}
+const fnum = v => String(+(+v).toPrecision(3));
+function coefUpdateText() {
+  const hi = coefLast;
+  try { katex.render(coefTex(coefVals, hi), $("coefFormula"), { displayMode: false, throwOnError: true, strict: "ignore" }); }
+  catch (e) { $("coefFormula").textContent = coefExprStr(coefVals); }
+  const L = [], v = coefVals, k = coefKind;
+  const dir = (nv, ov) => nv > ov ? "大きく" : "小さく";
+  if (hi >= 0) {
+    const nv = v[hi], ov = coefPrevVal, nm = COEF_NAMES[hi], big = Math.abs(nv) > Math.abs(ov), flip = (nv > 0) !== (ov > 0) && nv !== 0 && ov !== 0;
+    let t = "";
+    if (k === 1 && hi === 0) t = "傾き a が" + dir(nv, ov) + "なりました。" + (flip ? "符号が変わり、右上がりと右下がりが入れ替わりました。" : "直線は、y切片(0, b)を中心に回ります。a>0 で右上がり、a<0 で右下がりです。");
+    else if (k === 1) t = "y切片 b が" + dir(nv, ov) + "なりました。直線が" + (nv > ov ? "上" : "下") + "へ平行移動します(傾きは変わりません)。";
+    else if (k === 2 && hi === 0) t = "a が" + dir(nv, ov) + "なりました。" + (flip ? "符号が変わり、グラフの向き(上に凸/下に凸)が逆になりました。" : "|a| が" + (big ? "大きくなったので、放物線は細く(急に)" : "小さくなったので、放物線は太く(ゆるやかに)") + "なりました。");
+    else if (k === 2 && hi === 1) t = "b が" + dir(nv, ov) + "なりました。軸 x=−b/2a が左右に動き、頂点は放物線の形のまま動きます。y切片(0, c)は変わりません。";
+    else if (k === 2) t = "c が" + dir(nv, ov) + "なりました。グラフ全体が" + (nv > ov ? "上" : "下") + "へ平行移動します(形は変わりません)。y切片は c です。";
+    else if (k === 3 && hi === 0) t = "a が" + dir(nv, ov) + "なりました。" + (flip ? "符号が変わり、右上がり/右下がりが逆になりました。" : "|a| が" + (big ? "大きくなったので、立ち上がりが急に" : "小さくなったので、立ち上がりがゆるやかに") + "なりました。");
+    else if (k === 3 && hi === 1) t = "b が" + dir(nv, ov) + "なりました。変曲点 x=−b/3a が左右に動き、極大・極小の位置や有無が変わります。";
+    else if (k === 3 && hi === 2) t = "c が" + dir(nv, ov) + "なりました。原点付近の傾きが変わり、極大・極小があるかどうか(b²−3ac の符号)が変わります。";
+    else t = "d が" + dir(nv, ov) + "なりました。グラフ全体が" + (nv > ov ? "上" : "下") + "へ平行移動します(形は変わりません)。";
+    L.push('<div><span class="chg">' + nm + ": " + rnd4(ov) + " → " + rnd4(nv) + "</span>　" + t + "</div>");
+  }
+  const f = coefFeatures();
+  if (k === 1) { L.push("<div>傾き " + rnd4(v[0]) + "、y切片 " + rnd4(v[1]) + (v[0] === 0 ? "(傾きが0なので x軸に平行な直線)" : "") + "</div>"); }
+  else if (k === 2) {
+    if (v[0] === 0) L.push("<div>a=0 なので、2次式ではなく直線(1次式)になっています。</div>");
+    else {
+      const D = rnd4(v[1] * v[1] - 4 * v[0] * v[2]), vt = f.pts.find(p => p.main);
+      L.push("<div>" + (v[0] > 0 ? "下に凸(谷の形)" : "上に凸(山の形)") + "。頂点 (" + fnum(vt.x) + ", " + fnum(vt.y) + ")、軸 x=" + fnum(vt.x) + "</div>");
+      L.push("<div>判別式 D=b²−4ac=" + D + "(" + (D > 0 ? "x軸と2点で交わる" : D === 0 ? "x軸に接する" : "x軸と交わらない") + ")</div>");
+    }
+  } else {
+    if (v[0] === 0) L.push("<div>a=0 なので、3次式ではなくなっています。</div>");
+    else {
+      const e = f.pts.filter(p => p.main), dd = rnd4(v[1] * v[1] - 3 * v[0] * v[2]);
+      L.push("<div>" + (v[0] > 0 ? "右上がり" : "右下がり") + "の3次関数。b²−3ac=" + dd + "(" + (dd > 0 ? "極大・極小が1つずつある" : dd === 0 ? "極値はなく、平らになる点が1つある" : "極値はなく、単調に変化する") + ")</div>");
+      e.forEach(p => L.push("<div>" + p.t + " (" + fnum(p.x) + ", " + fnum(p.y) + ")</div>"));
+    }
+  }
+  $("coefExplain").innerHTML = L.join("");
+}
+function coefSyncFromFormula() { // 式1が多項式なら、その係数を取り込む
+  $("coefMsg").textContent = "";
+  const co = fn ? fitPoly(fn) : null;
+  if (co && co.length - 1 <= coefKind) {
+    const asc = co.map(qNum); while (asc.length < coefKind + 1) asc.push(0);
+    coefVals = asc.slice(0, coefKind + 1).reverse().map(rnd4);
+    if (coefVals[0] === 0 && coefKind > 1 && coefVals.every((x, i) => i === 0 || true)) { /* a=0 のまま取り込む */ }
+  } else if (fn) {
+    $("coefMsg").textContent = "式1が、この種類の多項式ではありません。動かすと、式1は係数の式に置きかわります。";
+    coefVals = coefDefaults(coefKind);
+  } else coefVals = coefDefaults(coefKind);
+  coefGhostVals = null; coefLast = -1;
+  coefBuildRows(); coefUpdateText();
+}
+function coefInit() { // モードを入れたとき・種類を変えたとき
+  coefKind = +$("coefKind").value;
+  if ($("latex").value.trim() && !fn) { try { drawFromInput(); } catch (e) {} }
+  coefSyncFromFormula();
+  coefApply();
+}
+function drawCoefGhost(X, Y, W, H) {
+  if (!coefOn() || !$("coefGhost").checked || !coefGhostVals) return;
+  if (coefGhostVals.length !== coefVals.length || coefGhostVals.every((x, i) => x === coefVals[i])) return;
+  const g = coefGhostVals.slice(), f = x => coefEval(g, x);
+  gctx.save(); gctx.setLineDash([7, 6]); gctx.globalAlpha = 0.4;
+  drawCurve(f, fcol[1], X, Y, W, H, false);
+  gctx.restore();
+}
+function drawCoefMarks(X, Y, W, H) {
+  if (!coefOn() || !$("coefMarks").checked || !fn) return;
+  const f = coefFeatures(), fs = Math.max(12, Math.round(tickFs() * 0.65));
+  gctx.save();
+  if (f.axisX !== null) { gctx.setLineDash([6, 5]); gctx.strokeStyle = "#e67e22"; gctx.lineWidth = 1.5; gctx.beginPath(); gctx.moveTo(X(f.axisX), 0); gctx.lineTo(X(f.axisX), H); gctx.stroke(); gctx.setLineDash([]); }
+  gctx.font = fs + "px sans-serif"; gctx.textBaseline = "alphabetic";
+  f.pts.forEach(p => {
+    const px = X(p.x), py = Y(p.y); if (px < -5 || px > W + 5 || py < -5 || py > H + 5) return;
+    gctx.beginPath();
+    if (p.t === "変曲点") gctx.rect(px - 5, py - 5, 10, 10); else gctx.arc(px, py, p.main ? 6 : 4.5, 0, Math.PI * 2);
+    gctx.fillStyle = p.main ? "#e67e22" : (p.t === "変曲点" ? "#8e44ad" : "#2a7"); gctx.fill(); gctx.lineWidth = 2; gctx.strokeStyle = "#fff"; gctx.stroke();
+    const t = p.t + " (" + fnum(p.x) + ", " + fnum(p.y) + ")", w = gctx.measureText(t).width;
+    const lx = Math.min(Math.max(px + 9, 2), W - w - 3), ly = Math.min(Math.max(py - 9, fs + 2), H - 4);
+    gctx.fillStyle = "rgba(255,255,255,0.85)"; gctx.fillRect(lx - 2, ly - fs, w + 4, fs + 4);
+    gctx.fillStyle = "#111"; gctx.fillText(t, lx, ly);
+  });
+  gctx.restore();
+}
+$("coefMode").addEventListener("change", () => { $("coefPanel").hidden = !coefOn(); if (coefOn()) coefInit(); else { coefGhostVals = null; drawGraph(); } });
+$("coefKind").addEventListener("change", coefInit);
+$("coefStep").addEventListener("change", () => { coefBuildRows(); });
+["coefGhost", "coefMarks"].forEach(id => $(id).addEventListener("change", drawGraph));
+$("coefReset").onclick = () => { coefVals = coefDefaults(coefKind); coefGhostVals = null; coefLast = -1; coefBuildRows(); coefApply(); };
+$("btnGraph").onclick = () => { drawFromInput(); if (coefOn() && !coefBusy) coefSyncFromFormula(); };
 
 /* ============ 拡大表示・文字選択の防止・微分パネルの置き場所 ============ */
 function toggleFocus() {

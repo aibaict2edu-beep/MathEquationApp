@@ -76,6 +76,16 @@
   .tabbtn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
   .subh { margin-top:16px; padding-top:10px; border-top:1px solid var(--line); }
   #pad { height:260px; }
+  #exBox summary { font-size:13px; color:var(--muted,#667); padding:6px 0; cursor:pointer; min-height:32px; }
+  #exBox[open] summary { margin-bottom:2px; }
+  #formulaBox .fbox { margin-top:6px; }
+  .preview { min-height:44px; }
+  #exprInfo:empty { display:none; }
+  .tabpanel[data-tab="draw"] > .row { flex-wrap:nowrap; gap:6px; }
+  .tabpanel[data-tab="draw"] > .row button { padding:8px 10px; white-space:nowrap; }
+  .tabpanel[data-tab="draw"] > .row .primary { margin-left:auto; }
+  #recMsg { margin:2px 0 4px; font-size:12px; }
+  .gline { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .preview { min-height:50px; font-size:1.35em; }
   @media (min-width:900px) {
     html, body { height:100%; }
@@ -84,12 +94,14 @@
     main#app { flex:1; min-height:0; grid-template-columns:minmax(380px, 440px) 1fr; grid-template-rows:minmax(0, 1fr); }
     #left { overflow-y:auto; padding-right:4px; }
     #right { order:0; position:static; overflow-y:auto; padding-bottom:0; }
-    #gwrap { width:min(100%, calc(100vh - 300px)); height:auto; aspect-ratio:1/1; min-height:0; }
+    #pad { height:clamp(130px, calc(100vh - 440px), 340px); }
+    #gwrap { width:min(100%, calc(100vh - 215px)); height:auto; aspect-ratio:1/1; min-height:0; }
   }
   @supports (height:100dvh) {
     @media (min-width:900px) {
       body { height:100dvh; }
-      #gwrap { width:min(100%, calc(100dvh - 300px)); }
+      #gwrap { width:min(100%, calc(100dvh - 215px)); }
+      #pad { height:clamp(130px, calc(100dvh - 440px), 340px); }
     }
   }
 </style>
@@ -97,7 +109,7 @@
 <body>
 <header>
   <h1>手書き数式グラフ</h1>
-  <span style="font-size:12px;opacity:.85">試作版 v8</span>
+  <span style="font-size:12px;opacity:.85">試作版 v9</span>
 </header>
 
 <main id="app">
@@ -114,19 +126,19 @@
         <input type="text" id="latex2" placeholder="例: y=2x+1" autocapitalize="off" autocorrect="off" spellcheck="false">
         <div class="preview" id="preview2"></div>
       </div>
+      <div class="row" style="margin-top:6px">
+        <button id="btnGraph" class="primary">グラフを描く</button>
+        <span class="msg" id="graphMsg"></span>
+      </div>
+      <details id="exBox"><summary>例の式を選ぶ ▼</summary>
       <div class="row chips">
-        <span class="msg">例:</span>
         <button data-ex="y=x^2-3x+1">x²-3x+1</button>
         <button data-ex="y=\sin x">sin x</button>
         <button data-ex="y=\frac{1}{x}">1/x</button>
         <button data-ex="y=\sqrt{x}">√x</button>
         <button data-ex="y=2^{x}">2^x</button>
         <button data-ex="y=\frac{x^2-1}{x+2}">分数式</button>
-      </div>
-      <div class="row">
-        <button id="btnGraph" class="primary">グラフを描く</button>
-        <span class="msg" id="graphMsg"></span>
-      </div>
+      </div></details>
       <div class="msg" id="exprInfo"></div>
     </section>
 
@@ -140,12 +152,12 @@
 
       <!-- タブ1: 手書き -->
       <div class="tabpanel" data-tab="draw">
-        <canvas id="pad"></canvas>
         <div class="row">
           <button id="btnPen" class="on">ペン</button>
           <button id="btnEraser">消しゴム</button>
-          <button id="btnUndo">1つ戻す</button>
-          <button id="btnClear">全消去</button>
+          <button id="btnUndo">戻す</button>
+          <button id="btnClear">消去</button>
+          <button id="btnRecognize" class="primary" disabled>認識する</button>
         </div>
         <div class="row" id="targetRow" hidden>
           <span class="msg">認識結果の入力先:</span>
@@ -153,10 +165,8 @@
           <button id="btnT2">式2</button>
           <label><input type="checkbox" id="autoClear" checked> 認識後に手書きを消す</label>
         </div>
-        <div class="row">
-          <button id="btnRecognize" class="primary" disabled>認識する</button>
-          <span class="msg" id="recMsg">APIキーを設定すると有効になります</span>
-        </div>
+        <div class="msg" id="recMsg">APIキーを設定すると有効になります</div>
+        <canvas id="pad"></canvas>
       </div>
 
       <!-- タブ2: 解析(微分・積分) -->
@@ -1058,7 +1068,7 @@ function drawFromInput() {
       }
     } else { fn2 = () => 0; info2 = { rhs: "0" }; }
   }
-  $("exprInfo").textContent = "解釈した式 → " + infoLines.join(" / ");
+  $("exprInfo").textContent = ""; // 正常時は表示しない(エラーはgraphMsgに出る)
   const trigNow = hasTrig(); // 三角関数を初めて描くときは、範囲が初期値のままなら -2π〜2π に合わせる
   if (trigNow && !lastTrig && axisKind() !== "num" && isInitialView()) { view = defaultView(); syncInputs(); }
   lastTrig = trigNow;

@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>手書き数式グラフ</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.0/math.min.js"></script>
+<style>
+  :root { --bg:#f4f6fa; --card:#fff; --ink:#1d2433; --sub:#5b667a; --accent:#2457d6; --line:#d5dbe6; --err:#c0392b; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif; -webkit-text-size-adjust:100%; }
+  header { padding:12px 16px; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  header h1 { font-size:18px; margin:0; }
+  main { max-width:1200px; margin:0 auto; padding:12px; display:grid; gap:12px; grid-template-columns:1fr; }
+  @media (min-width:900px){ main { grid-template-columns:1fr 1fr; } }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; }
+  h2 { font-size:15px; margin:0 0 8px; color:var(--sub); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+  button { font:inherit; padding:10px 14px; min-height:44px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.on { background:#e8eefc; border-color:var(--accent); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  input[type=text], input[type=password], input[type=number] { font:inherit; padding:10px; min-height:44px; border:1px solid var(--line); border-radius:8px; width:100%; }
+  input[type=number] { width:90px; }
+  #pad { width:100%; height:300px; background:#fff; border:2px dashed var(--line); border-radius:10px; touch-action:none; display:block; }
+  #graph { width:100%; aspect-ratio:1/1; background:#fff; border:1px solid var(--line); border-radius:10px; touch-action:none; display:block; }
+  #preview { min-height:70px; padding:10px; border:1px solid var(--line); border-radius:10px; font-size:1.6em; overflow-x:auto; display:flex; align-items:center; }
+  .msg { font-size:13px; color:var(--sub); min-height:1.4em; }
+  .msg.err { color:var(--err); }
+  code { background:#eef1f6; padding:1px 5px; border-radius:4px; font-size:12px; }
+  details { margin-top:8px; }
+  summary { cursor:pointer; color:var(--accent); min-height:32px; }
+  .chips button { padding:6px 10px; min-height:36px; font-size:13px; }
+  label { font-size:13px; color:var(--sub); display:flex; align-items:center; gap:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>手書き数式グラフ</h1>
+  <span style="font-size:12px;opacity:.85">試作版</span>
+</header>
+
+<main>
+  <!-- 左：入力 -->
+  <div style="display:grid;gap:12px;align-content:start">
+    <section>
+      <h2>① 手書き入力</h2>
+      <canvas id="pad"></canvas>
+      <div class="row">
+        <button id="btnPen" class="on">ペン</button>
+        <button id="btnEraser">消しゴム</button>
+        <button id="btnUndo">1つ戻す</button>
+        <button id="btnClear">全消去</button>
+        <label><input type="checkbox" id="penOnly"> ペンのみ(指を無視)</label>
+      </div>
+      <div class="row">
+        <button id="btnRecognize" class="primary" disabled>認識する</button>
+        <span class="msg" id="recMsg">APIキーを設定すると有効になります</span>
+      </div>
+      <details id="settings">
+        <summary>設定(APIキー)</summary>
+        <div class="row" style="flex-direction:column;align-items:stretch">
+          <label>Claude APIキー(この端末のブラウザにだけ保存されます)</label>
+          <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off">
+          <label>モデル名</label>
+          <input type="text" id="modelName" value="claude-sonnet-5-5">
+          <div class="row"><button id="btnSaveKey">保存</button><button id="btnDelKey">キーを削除</button></div>
+          <div class="msg">キーはソースに書かれません。公開リポジトリにキーを入れないでください。</div>
+        </div>
+      </details>
+    </section>
+
+    <section>
+      <h2>認識結果(LaTeX)※修正できます</h2>
+      <input type="text" id="latex" placeholder="例: y=x^2-3x+1" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="row chips">
+        <span class="msg">例:</span>
+        <button data-ex="y=x^2-3x+1">x²-3x+1</button>
+        <button data-ex="y=\sin x">sin x</button>
+        <button data-ex="y=\frac{1}{x}">1/x</button>
+        <button data-ex="y=\sqrt{x}">√x</button>
+        <button data-ex="y=2^{x}">2^x</button>
+        <button data-ex="y=\frac{x^2-1}{x+2}">分数式</button>
+      </div>
+      <h2 style="margin-top:12px">② 画面表示</h2>
+      <div id="preview"></div>
+      <div class="row">
+        <button id="btnGraph" class="primary">グラフを描く</button>
+        <span class="msg" id="graphMsg"></span>
+      </div>
+      <div class="msg" id="exprInfo"></div>
+    </section>
+  </div>
+
+  <!-- 右：グラフ -->
+  <section>
+    <h2>グラフ</h2>
+    <canvas id="graph"></canvas>
+    <div class="row">
+      <label>x:<input type="number" id="xmin" value="-10" step="any"> 〜 <input type="number" id="xmax" value="10" step="any"></label>
+      <label>y:<input type="number" id="ymin" value="-10" step="any"> 〜 <input type="number" id="ymax" value="10" step="any"></label>
+    </div>
+    <div class="row">
+      <button id="btnApplyRange">範囲を反映</button>
+      <button id="btnZoomIn">拡大</button>
+      <button id="btnZoomOut">縮小</button>
+      <button id="btnAuto">y範囲を自動調整</button>
+      <button id="btnReset">初期範囲</button>
+    </div>
+    <div class="msg">対応: <code>y=f(x)</code> 形式。分数・累乗・√・三角関数・指数・対数・絶対値に対応。グラフ上をドラッグで移動できます。</div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+/* ============ 手書きキャンバス ============ */
+const pad = $("pad"), pctx = pad.getContext("2d");
+let strokes = [], cur = null, tool = "pen";
+
+function setupPad() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = pad.getBoundingClientRect();
+  pad.width = Math.round(r.width * dpr);
+  pad.height = Math.round(r.height * dpr);
+  pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  redrawPad();
+}
+function drawStroke(s) {
+  const p = s.pts;
+  if (!p.length) return;
+  pctx.strokeStyle = s.erase ? "#fff" : "#111";
+  pctx.fillStyle = pctx.strokeStyle;
+  pctx.lineCap = "round"; pctx.lineJoin = "round";
+  if (p.length === 1) {
+    pctx.beginPath(); pctx.arc(p[0].x, p[0].y, (s.erase ? 24 : 3) / 2, 0, Math.PI * 2); pctx.fill(); return;
+  }
+  for (let i = 1; i < p.length; i++) {
+    pctx.lineWidth = s.erase ? 24 : 2 + (p[i].p || 0.5) * 3;
+    pctx.beginPath(); pctx.moveTo(p[i-1].x, p[i-1].y); pctx.lineTo(p[i].x, p[i].y); pctx.stroke();
+  }
+}
+function redrawPad() {
+  const r = pad.getBoundingClientRect();
+  pctx.fillStyle = "#fff"; pctx.fillRect(0, 0, r.width, r.height);
+  strokes.forEach(drawStroke);
+}
+function padPt(e) {
+  const r = pad.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top, p: e.pointerType === "pen" ? e.pressure : 0.5 };
+}
+pad.addEventListener("pointerdown", e => {
+  if ($("penOnly").checked && e.pointerType === "touch") return;
+  e.preventDefault();
+  pad.setPointerCapture(e.pointerId);
+  cur = { erase: tool === "eraser", pts: [padPt(e)], id: e.pointerId };
+  strokes.push(cur);
+  drawStroke(cur);
+});
+pad.addEventListener("pointermove", e => {
+  if (!cur || e.pointerId !== cur.id) return;
+  e.preventDefault();
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of (evs.length ? evs : [e])) cur.pts.push(padPt(ev));
+  redrawPad();
+});
+const endStroke = e => { if (cur && e.pointerId === cur.id) cur = null; };
+pad.addEventListener("pointerup", endStroke);
+pad.addEventListener("pointercancel", endStroke);
+["touchstart","touchmove","gesturestart"].forEach(t => pad.addEventListener(t, e => e.preventDefault(), { passive: false }));
+
+$("btnPen").onclick = () => { tool = "pen"; $("btnPen").classList.add("on"); $("btnEraser").classList.remove("on"); };
+$("btnEraser").onclick = () => { tool = "eraser"; $("btnEraser").classList.add("on"); $("btnPen").classList.remove("on"); };
+$("btnUndo").onclick = () => { strokes.pop(); redrawPad(); };
+$("btnClear").onclick = () => { strokes = []; redrawPad(); };
+window.addEventListener("resize", () => { setupPad(); setupGraph(); });
+
+/* ============ APIキー・認識 ============ */
+function loadKey() {
+  try {
+    $("apiKey").value = localStorage.getItem("mh_key") || "";
+    $("modelName").value = localStorage.getItem("mh_model") || "claude-sonnet-5-5";
+  } catch (e) {}
+  updateRecState();
+}
+function updateRecState() {
+  const has = $("apiKey").value.trim().length > 0;
+  $("btnRecognize").disabled = !has;
+  $("recMsg").textContent = has ? "書き終えたら「認識する」を押してください" : "APIキーを設定すると有効になります";
+  $("recMsg").className = "msg";
+}
+$("btnSaveKey").onclick = () => {
+  try {
+    localStorage.setItem("mh_key", $("apiKey").value.trim());
+    localStorage.setItem("mh_model", $("modelName").value.trim());
+  } catch (e) { alert("この環境ではブラウザ保存が使えません。ページを開いている間だけ有効です。"); }
+  updateRecState();
+};
+$("btnDelKey").onclick = () => {
+  try { localStorage.removeItem("mh_key"); } catch (e) {}
+  $("apiKey").value = ""; updateRecState();
+};
+$("apiKey").addEventListener("input", updateRecState);
+
+function padToBase64() {
+  const maxSide = 1280;
+  let w = pad.width, h = pad.height;
+  const k = Math.min(1, maxSide / Math.max(w, h));
+  const t = document.createElement("canvas");
+  t.width = Math.round(w * k); t.height = Math.round(h * k);
+  const c = t.getContext("2d");
+  c.fillStyle = "#fff"; c.fillRect(0, 0, t.width, t.height);
+  c.drawImage(pad, 0, 0, t.width, t.height);
+  return t.toDataURL("image/png").split(",")[1];
+}
+
+$("btnRecognize").onclick = async () => {
+  if (!strokes.some(s => !s.erase)) { setRec("先に数式を書いてください", true); return; }
+  const key = $("apiKey").value.trim();
+  const model = $("modelName").value.trim() || "claude-sonnet-5-5";
+  setRec("認識中…"); $("btnRecognize").disabled = true;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model, max_tokens: 300,
+        messages: [{ role: "user", content: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: padToBase64() } },
+          { type: "text", text: "この画像の手書き数式をLaTeXに変換してください。出力はLaTeXの式1行のみ。説明、コードブロック、$記号は付けないでください。数式が読み取れない場合は UNREADABLE とだけ出力してください。" }
+        ]}]
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data.error && data.error.message) || ("HTTP " + res.status));
+    let t = (data.content && data.content[0] && data.content[0].text || "").trim();
+    t = t.replace(/^```[a-z]*\n?|```$/gim, "").replace(/^\$\$?|\$\$?$/g, "").trim();
+    if (!t || t === "UNREADABLE") { setRec("読み取れませんでした。書き直してください", true); }
+    else { $("latex").value = t; renderPreview(); setRec("認識しました。違っていれば下の欄で修正できます"); drawFromInput(); }
+  } catch (err) {
+    setRec("認識に失敗: " + err.message, true);
+  } finally { updateBtnOnly(); }
+};
+function setRec(m, err) { $("recMsg").textContent = m; $("recMsg").className = "msg" + (err ? " err" : ""); }
+function updateBtnOnly() { $("btnRecognize").disabled = !$("apiKey").value.trim(); }
+
+/* ============ 数式表示 ============ */
+function renderPreview() {
+  const s = $("latex").value.trim();
+  const box = $("preview");
+  if (!s) { box.textContent = ""; return; }
+  try { katex.render(s, box, { throwOnError: true, displayMode: false }); }
+  catch (e) { box.textContent = "(表示できない式です)"; }
+}
+$("latex").addEventListener("input", renderPreview);
+document.querySelectorAll("[data-ex]").forEach(b => b.onclick = () => {
+  $("latex").value = b.dataset.ex; renderPreview(); drawFromInput();
+});
+
+/* ============ LaTeX → math.js 式 ============ */
+function grabBrace(s, i) { // s[i]==='{'
+  let d = 0;
+  for (let j = i; j < s.length; j++) {
+    if (s[j] === "{") d++;
+    else if (s[j] === "}") { d--; if (d === 0) return { body: s.slice(i + 1, j), end: j + 1 }; }
+  }
+  throw new Error("括弧が閉じていません");
+}
+function skipSp(s, i) { while (s[i] === " ") i++; return i; }
+
+function convFrac(s) {
+  for (;;) {
+    const m = /\\[dt]?frac/.exec(s);
+    if (!m) return s;
+    let i = skipSp(s, m.index + m[0].length);
+    if (s[i] !== "{") throw new Error("分数の形式が不正です");
+    const a = grabBrace(s, i);
+    i = skipSp(s, a.end);
+    if (s[i] !== "{") throw new Error("分数の形式が不正です");
+    const b = grabBrace(s, i);
+    s = s.slice(0, m.index) + "((" + a.body + ")/(" + b.body + "))" + s.slice(b.end);
+  }
+}
+function convSqrt(s) {
+  for (;;) {
+    const m = /\\sqrt/.exec(s);
+    if (!m) return s;
+    let i = skipSp(s, m.index + 5), n = null;
+    if (s[i] === "[") {
+      const j = s.indexOf("]", i);
+      if (j < 0) throw new Error("√の形式が不正です");
+      n = s.slice(i + 1, j); i = skipSp(s, j + 1);
+    }
+    if (s[i] !== "{") throw new Error("√の形式が不正です");
+    const a = grabBrace(s, i);
+    const rep = n ? "nthRoot((" + a.body + "),(" + n + "))" : "sqrt(" + a.body + ")";
+    s = s.slice(0, m.index) + rep + s.slice(a.end);
+  }
+}
+function matchParen(s, i) {
+  let d = 0;
+  for (let j = i; j < s.length; j++) {
+    if (s[j] === "(") d++;
+    else if (s[j] === ")") { d--; if (d === 0) return j; }
+  }
+  throw new Error("括弧が閉じていません");
+}
+const FN = "asinh|acosh|atanh|asin|acos|atan|sinh|cosh|tanh|sin|cos|tan|cot|sec|csc|log10|log|exp|abs|sqrt|nthRoot";
+function fixFuncs(s) { // sin x → sin(x), sin^2 x → (sin(x))^2
+  const re = new RegExp("(?<![a-zA-Z])(" + FN + ")(?:\\^\\(?(-?[0-9.]+)\\)?)?", "g");
+  let out = "", last = 0, m;
+  while ((m = re.exec(s))) {
+    const name = m[1], pow = m[2];
+    let i = skipSp(s, m.index + m[0].length), arg, end;
+    if (s[i] === "(") {
+      const j = matchParen(s, i); arg = fixFuncs(s.slice(i + 1, j)); end = j + 1;
+    } else {
+      const t = /^-?[0-9.]*[a-zA-Z]?/.exec(s.slice(i));
+      if (!t || !t[0] || t[0] === "-") throw new Error(name + " の引数が読み取れません");
+      arg = t[0]; end = i + t[0].length;
+    }
+    const call = name + "(" + arg + ")";
+    out += s.slice(last, m.index) + (pow ? "(" + call + ")^(" + pow + ")" : call);
+    last = end; re.lastIndex = end;
+  }
+  return out + s.slice(last);
+}
+function latexToExpr(src) {
+  let s = " " + src + " ";
+  s = s.replace(/\\left|\\right|\\displaystyle|\\,|\\;|\\:|\\!|\\quad|\\qquad|\\ /g, " ");
+  s = s.trim();
+  if (s.includes("=")) {
+    const m = /^(y|f\s*\(\s*x\s*\))\s*=([^=]*)$/.exec(s);
+    if (!m) throw new Error("y=f(x) の形式のみ対応しています");
+    s = m[2].trim();
+  }
+  s = convFrac(s);
+  s = convSqrt(s);
+  s = s.replace(/\\(a?)r?c?(sin|cos|tan)h?/g, m => m); // no-op
+  s = s.replace(/\\arcsin/g, "asin").replace(/\\arccos/g, "acos").replace(/\\arctan/g, "atan")
+       .replace(/\\(sinh|cosh|tanh|sin|cos|tan|cot|sec|csc|exp)\b/g, "$1")
+       .replace(/\\ln\b/g, "log").replace(/\\log\b/g, "log10")
+       .replace(/\\pi\b/g, "pi").replace(/\\(cdot|times)\b/g, "*").replace(/\\div\b/g, "/")
+       .replace(/\\(lvert|rvert|vert)\b/g, "|");
+  const bad = /\\[a-zA-Z]+/.exec(s);
+  if (bad) throw new Error("未対応の記号です: " + bad[0]);
+  // 絶対値 |...|
+  let k = 0; s = s.replace(/\|/g, () => (k++ % 2 === 0 ? "abs(" : ")"));
+  if (k % 2) throw new Error("絶対値の記号が対応していません");
+  s = s.replace(/\{/g, "(").replace(/\}/g, ")");
+  s = fixFuncs(s);
+  s = s.replace(/\)\s*\(/g, ")*(")
+       .replace(/(?<![a-zA-Z])(\d+(?:\.\d+)?)\s*\(/g, "$1*(")
+       .replace(/(?<![a-zA-Z])x\s*\(/g, "x*(");
+  return s.trim();
+}
+
+/* ============ グラフ ============ */
+const gc = $("graph"), gctx = gc.getContext("2d");
+let view = { xmin: -10, xmax: 10, ymin: -10, ymax: 10 };
+let fn = null;
+
+function setupGraph() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = gc.getBoundingClientRect();
+  gc.width = Math.round(r.width * dpr); gc.height = Math.round(r.height * dpr);
+  gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawGraph();
+}
+function niceStep(range) {
+  const raw = range / 8, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
+}
+function fmt(v) { return Math.abs(v) < 1e-12 ? "0" : String(+v.toPrecision(6)); }
+function drawGraph() {
+  const r = gc.getBoundingClientRect(), W = r.width, H = r.height;
+  const { xmin, xmax, ymin, ymax } = view;
+  const X = x => (x - xmin) / (xmax - xmin) * W;
+  const Y = y => H - (y - ymin) / (ymax - ymin) * H;
+  gctx.fillStyle = "#fff"; gctx.fillRect(0, 0, W, H);
+  gctx.font = "11px sans-serif";
+  const sx = niceStep(xmax - xmin), sy = niceStep(ymax - ymin);
+  gctx.lineWidth = 1;
+  for (let x = Math.ceil(xmin / sx) * sx; x <= xmax; x += sx) {
+    gctx.strokeStyle = "#e6eaf2"; gctx.beginPath(); gctx.moveTo(X(x), 0); gctx.lineTo(X(x), H); gctx.stroke();
+  }
+  for (let y = Math.ceil(ymin / sy) * sy; y <= ymax; y += sy) {
+    gctx.strokeStyle = "#e6eaf2"; gctx.beginPath(); gctx.moveTo(0, Y(y)); gctx.lineTo(W, Y(y)); gctx.stroke();
+  }
+  // 軸
+  gctx.strokeStyle = "#555"; gctx.lineWidth = 1.5;
+  const ax = Math.min(Math.max(X(0), 0), W), ay = Math.min(Math.max(Y(0), 0), H);
+  gctx.beginPath(); gctx.moveTo(ax, 0); gctx.lineTo(ax, H); gctx.moveTo(0, ay); gctx.lineTo(W, ay); gctx.stroke();
+  gctx.fillStyle = "#555";
+  for (let x = Math.ceil(xmin / sx) * sx; x <= xmax; x += sx) {
+    if (Math.abs(x) < sx / 1e3) continue;
+    gctx.textAlign = "center"; gctx.fillText(fmt(x), X(x), Math.min(ay + 13, H - 3));
+  }
+  for (let y = Math.ceil(ymin / sy) * sy; y <= ymax; y += sy) {
+    if (Math.abs(y) < sy / 1e3) continue;
+    gctx.textAlign = "left"; gctx.fillText(fmt(y), Math.min(ax + 4, W - 30), Y(y) - 2);
+  }
+  gctx.textAlign = "left"; gctx.fillText("0", Math.min(ax + 4, W - 10), Math.min(ay + 13, H - 3));
+  // 曲線
+  if (!fn) return;
+  gctx.strokeStyle = "#d62d2d"; gctx.lineWidth = 2.5; gctx.lineJoin = "round";
+  gctx.beginPath();
+  let pen = false, prevPy = 0;
+  const steps = Math.ceil(W * 2);
+  for (let i = 0; i <= steps; i++) {
+    const x = xmin + (xmax - xmin) * i / steps;
+    let y;
+    try { y = fn(x); } catch (e) { y = NaN; }
+    if (typeof y !== "number" || !isFinite(y)) { pen = false; continue; }
+    const px = X(x), py = Y(y);
+    if (Math.abs(py) > H * 50) { pen = false; continue; }
+    if (pen && Math.abs(py - prevPy) > H * 1.5) pen = false; // 不連続（漸近線など）
+    if (!pen) { gctx.moveTo(px, py); pen = true; } else gctx.lineTo(px, py);
+    prevPy = py;
+  }
+  gctx.stroke();
+}
+function syncInputs() {
+  $("xmin").value = +view.xmin.toPrecision(6); $("xmax").value = +view.xmax.toPrecision(6);
+  $("ymin").value = +view.ymin.toPrecision(6); $("ymax").value = +view.ymax.toPrecision(6);
+}
+function readInputs() {
+  const v = { xmin: +$("xmin").value, xmax: +$("xmax").value, ymin: +$("ymin").value, ymax: +$("ymax").value };
+  if (v.xmin >= v.xmax || v.ymin >= v.ymax || Object.values(v).some(n => !isFinite(n))) {
+    $("graphMsg").textContent = "範囲の指定が不正です(最小<最大)"; $("graphMsg").className = "msg err"; return false;
+  }
+  view = v; return true;
+}
+function autoY() {
+  if (!fn) return;
+  const ys = [];
+  for (let i = 0; i <= 800; i++) {
+    const x = view.xmin + (view.xmax - view.xmin) * i / 800;
+    try { const y = fn(x); if (typeof y === "number" && isFinite(y)) ys.push(y); } catch (e) {}
+  }
+  if (ys.length < 2) return;
+  ys.sort((a, b) => a - b);
+  let lo = ys[Math.floor(ys.length * 0.03)], hi = ys[Math.ceil(ys.length * 0.97) - 1];
+  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+  const pad = (hi - lo) * 0.15;
+  view.ymin = lo - pad; view.ymax = hi + pad;
+  syncInputs(); drawGraph();
+}
+function drawFromInput() {
+  const src = $("latex").value.trim();
+  $("graphMsg").className = "msg";
+  if (!src) { $("graphMsg").textContent = "式を入力してください"; return; }
+  try {
+    const expr = latexToExpr(src);
+    const node = math.parse(expr);
+    const code = node.compile();
+    const test = code.evaluate({ x: 1 });
+    if (test && typeof test === "object" && !(typeof test === "number")) {
+      if (typeof test.re === "undefined" && typeof test.toNumber !== "function") throw new Error("実数の関数として評価できません");
+    }
+    fn = x => { const v = code.evaluate({ x }); return typeof v === "number" ? v : (v && typeof v.toNumber === "function" ? v.toNumber() : NaN); };
+    $("exprInfo").textContent = "解釈した式: y = " + expr;
+    $("graphMsg").textContent = "";
+    if (!readInputs()) return;
+    drawGraph();
+  } catch (e) {
+    fn = null; drawGraph();
+    $("exprInfo").textContent = "";
+    $("graphMsg").textContent = "グラフにできません: " + e.message; $("graphMsg").className = "msg err";
+  }
+}
+$("btnGraph").onclick = drawFromInput;
+$("btnApplyRange").onclick = () => { if (readInputs()) { $("graphMsg").textContent = ""; drawGraph(); } };
+$("btnAuto").onclick = () => { if (readInputs()) autoY(); };
+$("btnReset").onclick = () => { view = { xmin: -10, xmax: 10, ymin: -10, ymax: 10 }; syncInputs(); drawGraph(); };
+function zoom(f) {
+  const cx = (view.xmin + view.xmax) / 2, cy = (view.ymin + view.ymax) / 2;
+  const hx = (view.xmax - view.xmin) / 2 * f, hy = (view.ymax - view.ymin) / 2 * f;
+  view = { xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy }; syncInputs(); drawGraph();
+}
+$("btnZoomIn").onclick = () => zoom(0.7);
+$("btnZoomOut").onclick = () => zoom(1 / 0.7);
+
+// ドラッグで移動
+let drag = null;
+gc.addEventListener("pointerdown", e => { gc.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, v: { ...view } }; });
+gc.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const r = gc.getBoundingClientRect();
+  const dx = (e.clientX - drag.x) / r.width * (drag.v.xmax - drag.v.xmin);
+  const dy = (e.clientY - drag.y) / r.height * (drag.v.ymax - drag.v.ymin);
+  view = { xmin: drag.v.xmin - dx, xmax: drag.v.xmax - dx, ymin: drag.v.ymin + dy, ymax: drag.v.ymax + dy };
+  syncInputs(); drawGraph();
+});
+const endDrag = () => { drag = null; };
+gc.addEventListener("pointerup", endDrag); gc.addEventListener("pointercancel", endDrag);
+gc.addEventListener("wheel", e => { e.preventDefault(); zoom(e.deltaY > 0 ? 1.15 : 0.87); }, { passive: false });
+
+/* ============ 初期化 ============ */
+loadKey(); setupPad(); setupGraph(); syncInputs();
+</script>
+</body>
+</html>

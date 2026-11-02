@@ -153,7 +153,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v34</span>
+    <span style="font-size:12px;opacity:.85">試作版 v35</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -548,12 +548,13 @@ $("btnT2").onclick = () => setTarget(2);
 const regionOn = () => $("regionMode").checked;
 const useG = () => regionOn() && $("regionType").value === "curves";
 function updateModeUI() {
-  const on = regionOn(), curves = useG();
+  const on = regionOn(), curves = useG(), second = (on && curves) || isIneqSrc($("latex").value);
   $("regionPanel").hidden = !on;
-  $("f2box").hidden = !(on && curves);
-  $("targetRow").hidden = !(on && curves);
-  if (!(on && curves)) setTarget(1);
+  $("f2box").hidden = !second;
+  $("targetRow").hidden = !second;
+  if (!second) setTarget(1);
 }
+$("latex").addEventListener("input", updateModeUI);
 
 /* ============ APIキー・認識 ============ */
 function loadKey() {
@@ -638,7 +639,7 @@ function updateBtnOnly() { $("btnRecognize").disabled = !$("apiKey").value.trim(
 
 /* ============ 数式表示 ============ */
 function renderOne(inputId, boxId) {
-  const s = normalizeInput($(inputId).value).trim();
+  const s = normalizeInput(ineqPrep($(inputId).value)).replace(/<=/g, "\\leqq ").replace(/>=/g, "\\geqq ").trim();
   const box = $(boxId);
   if (!s) { box.textContent = ""; return; }
   try { katex.render(s, box, { throwOnError: true, displayMode: false, strict: "ignore" }); }
@@ -1266,6 +1267,7 @@ let view = { xmin: -10, xmax: 10, ymin: -10, ymax: 10 };
 let fn = null, fn2 = null, region = null, info1 = null, info2 = null;
 let icpt = [], diffPt = null;
 let cn = [null, null]; // 円・楕円・双曲線(式1・式2)
+let iq = [null, null]; // 不等式(式1・式2)
 
 function setupGraph() {
   const dpr = window.devicePixelRatio || 1;
@@ -1442,7 +1444,7 @@ function drawGraph() {
   drawCoefGhost(X, Y, W, H);
   if (fn) drawCurve(fn, fcol[1], X, Y, W, H, isTan(info1), !!tfFn);
   if (tfFn) drawTf(X, Y, W, H);
-  if (fn2 && useG()) drawCurve(fn2, fcol[2], X, Y, W, H, isTan(info2));
+  if (fn2 && (useG() || iq[0])) drawCurve(fn2, fcol[2], X, Y, W, H, isTan(info2));
   { const S = cutSetup();
     if (S && ccut) {
       const pg = conicPolygon(S.q.c, 240);
@@ -1463,6 +1465,7 @@ function drawGraph() {
     if (pg) { gctx.beginPath(); pg.forEach((p, i) => { if (i) gctx.lineTo(X(p[0]), Y(p[1])); else gctx.moveTo(X(p[0]), Y(p[1])); }); gctx.closePath(); gctx.fillStyle = "rgba(46,160,90,0.42)"; gctx.fill(); }
   }
   cn.forEach((q, i) => { if (q) drawConic(q, fcol[i + 1], X, Y, W, H); });
+  drawIneq(X, Y, W, H);
   drawCoefMarks(X, Y, W, H);
   drawDots(X, Y, W, H);
   drawDiffMark(X, Y, W, H);
@@ -1560,9 +1563,97 @@ function extTable2Tex(E, lab2) { // 凹凸表
 }
 /*EXT_END*/
 
+/*INEQ_START*/
+/* ============ 不等式の領域・2次不等式 ============ */
+function ineqFlip(op) { return op === "<" ? ">" : op === ">" ? "<" : op === "<=" ? ">=" : "<="; }
+function ineqPrep(src) { // 不等号の書き方をそろえる(≦ ≧ \leq \geq など → <= >=)
+  return String(src)
+    .replace(/\\leqq|\\leqslant|\\leq|\\le(?![a-zA-Z])|≦|≤|⩽/g, "<=")
+    .replace(/\\geqq|\\geqslant|\\geq|\\ge(?![a-zA-Z])|≧|≥|⩾/g, ">=")
+    .replace(/\\lt(?![a-zA-Z])/g, "<").replace(/\\gt(?![a-zA-Z])/g, ">")
+    .replace(/＜/g, "<").replace(/＞/g, ">").replace(/＝/g, "=");
+}
+function ineqSplit(src) { // {lhs, rhs, op} または null
+  const s = ineqPrep(src);
+  const m = /^([^<>=]*?)(<=|>=|=<|=>|<|>)([^<>=]*)$/.exec(s);
+  if (!m || !m[1].trim() || !m[3].trim()) return null;
+  const op = m[2] === "=<" ? "<=" : m[2] === "=>" ? ">=" : m[2];
+  return { lhs: m[1].trim(), rhs: m[3].trim(), op };
+}
+function ineqClassify(g, op) { // g(x,y) OP 0 の形から、領域の判定方法を決める
+  const pts = [[0.3, 0.7], [-1.7, 2.2], [2.9, -1.3], [0.11, -3.1], [-2.3, -0.4], [1.9, 1.6]];
+  const d = pts.map(([x, y]) => g(x, y + 1) - g(x, y));
+  if (d.some(v => !isFinite(v))) return null;
+  const strict = !op.includes("=");
+  const sense = op[0]; // "<" か ">"
+  const tol = 1e-7 * (1 + Math.abs(d[0]));
+  const constY = d.every(v => Math.abs(v - d[0]) < tol);
+  if (constY && Math.abs(d[0]) < 1e-9) {
+    const G = x => g(x, 0);
+    const co = fitPoly(G, 6);
+    if (co && co.length <= 2) { /* 1次以下は、領域(直線の片側)として扱う */ }
+    else return { kind: "xonly", G, co, sense, strict, op };
+  } else if (constY) {
+    const c = d[0], h = x => -g(x, 0) / c;
+    return { kind: "yfun", h, sense: c > 0 ? sense : (sense === "<" ? ">" : "<"), strict, op, hco: fitPoly(h, 6) };
+  }
+  const cf = conicFitFn(g, true); if (!cf) return null;
+  let sg = 0;
+  for (const [x, y] of [[0.37, -0.53], [1.3, 0.9], [-0.8, 1.7], [2.2, -1.1]]) {
+    const a = g(x, y), b = conicVal(cf, x, y);
+    if (Math.abs(a) > 1e-6 && Math.abs(b) > 1e-6) { const s = Math.sign(a * b); if (sg && s !== sg) return null; sg = s; }
+  }
+  if (!sg) return null;
+  return { kind: "quad", c: cf, cl: conicClass(cf), sense: sg > 0 ? sense : (sense === "<" ? ">" : "<"), strict, op };
+}
+function ineqCol(q, x) { // 画面の1列(x 固定)で、y が領域に入るかを返す関数
+  if (q.kind === "yfun") { const hv = safeCall(q.h, x); return q.sense === ">" ? (y => y > hv) : (y => y < hv); }
+  if (q.kind === "xonly") { const v = safeCall(q.G, x), ok = q.sense === "<" ? v < 0 : v > 0; return () => ok; }
+  const c = q.c, b1 = c.B * x + c.E, b0 = c.A * x * x + c.D * x + c.F;
+  return q.sense === "<" ? (y => c.C * y * y + b1 * y + b0 < 0) : (y => c.C * y * y + b1 * y + b0 > 0);
+}
+function ineqXSolution(co, op) { // 多項式 G(x) OP 0 の解(区間のリスト)
+  const G = x => polyEvalNum(co, x);
+  let M = 0; const an = Math.abs(qNum(co[co.length - 1])) || 1; co.forEach(c => { M = Math.max(M, Math.abs(qNum(c)) / an); });
+  const R = 2 + M, roots = findRoots(G, -R, R, 20000).sort((a, b) => a - b);
+  const bp = [-Infinity, ...roots, Infinity], sel = [], incl = op.includes("="), less = op[0] === "<";
+  for (let i = 0; i + 1 < bp.length; i++) {
+    const lo = bp[i], hi = bp[i + 1];
+    const m = lo === -Infinity ? (hi === Infinity ? 0 : hi - 1) : (hi === Infinity ? lo + 1 : lo + (hi - lo) * 0.4137);
+    const v = G(m); sel.push(less ? v < 0 : v > 0);
+  }
+  const iv = []; let cur = null;
+  for (let i = 0; i < sel.length; i++) {
+    const lo = i === 0 ? null : roots[i - 1], hi = i === sel.length - 1 ? null : roots[i];
+    if (sel[i]) {
+      if (cur && incl) cur.hi = hi, cur.hiInc = incl && hi !== null;
+      else { if (cur) iv.push(cur); cur = { lo, hi, loInc: incl && lo !== null, hiInc: incl && hi !== null }; }
+    } else {
+      if (cur) { iv.push(cur); cur = null; }
+      if (incl && i < roots.length && i > 0 && !sel[i - 1] && roots[i - 1] !== undefined && false) {}
+    }
+  }
+  if (cur) iv.push(cur);
+  if (incl) roots.forEach((r, k) => { if (!sel[k] && !sel[k + 1]) iv.push({ lo: r, hi: r, loInc: true, hiInc: true }); });
+  iv.sort((a, b) => (a.lo === null ? -Infinity : a.lo) - (b.lo === null ? -Infinity : b.lo));
+  return { roots, intervals: iv };
+}
+function ineqIntervalsTex(sol, lab) {
+  if (!sol.intervals.length) return "\\text{解なし}";
+  return sol.intervals.map(v => {
+    if (v.lo === null && v.hi === null) return "\\text{すべての実数}";
+    const lt = inc => inc ? "\\leqq " : "<";
+    if (v.lo !== null && v.hi !== null && v.lo === v.hi) return "x=" + lab.xtex(v.lo);
+    if (v.lo === null) return "x" + lt(v.hiInc) + lab.xtex(v.hi);
+    if (v.hi === null) return lab.xtex(v.lo) + lt(v.loInc) + "x";
+    return lab.xtex(v.lo) + lt(v.loInc) + "x" + lt(v.hiInc) + lab.xtex(v.hi);
+  }).join(",\\ \\ ");
+}
+/*INEQ_END*/
+
 /*CONIC_START*/
 /* ============ 円・楕円・双曲線(2次曲線 Ax²+Bxy+Cy²+Dx+Ey+F=0) ============ */
-function conicFitFn(g) { // g(x,y) から係数を求める。2次式でなければ null
+function conicFitFn(g, allowLinear) { // g(x,y) から係数を求める。2次式でなければ null
   const pts = [];
   for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) pts.push([i * 0.7 + 0.13, j * 0.9 - 0.21]);
   const bas = (x, y) => [x * x, x * y, y * y, x, y, 1];
@@ -1579,7 +1670,7 @@ function conicFitFn(g) { // g(x,y) から係数を求める。2次式でなけ�
   let big = 0; c.forEach(v => { if (Math.abs(v) > Math.abs(big)) big = v; });
   if (Math.abs(big) < 1e-12) return null;
   const u = c.map(v => { const w = v / big; return Math.abs(w) < 1e-9 ? 0 : w; });
-  if (u[0] === 0 && u[1] === 0 && u[2] === 0) return null; // 2次の項がない(直線)
+  if (u[0] === 0 && u[1] === 0 && u[2] === 0 && !allowLinear) return null; // 2次の項がない(直線)
   const qs = u.map(v => qFromFloat(v, 1000, 1e-8));
   let co, ex = qs.every(q => q);
   if (ex) {
@@ -1587,7 +1678,7 @@ function conicFitFn(g) { // g(x,y) から係数を求める。2次式でなけ�
     co = qs.map(q => q.n * (L / q.d));
     const G = gcdAll(co) || 1; co = co.map(v => v / G);
   } else co = u.slice();
-  const first = co[0] !== 0 ? co[0] : (co[1] !== 0 ? co[1] : co[2]);
+  const first = co[0] !== 0 ? co[0] : (co[1] !== 0 ? co[1] : (co[2] !== 0 ? co[2] : (co[3] !== 0 ? co[3] : co[4])));
   if (first < 0) co = co.map(v => -v || 0);
   return { A: co[0], B: co[1], C: co[2], D: co[3], E: co[4], F: co[5], ex };
 }
@@ -2010,31 +2101,31 @@ function drawFromInput() {
   const infoLines = [];
   const src1 = $("latex").value.trim();
   if (!src1) { $("graphMsg").textContent = "式1を入力してください"; drawGraph(); refreshRegionUI(); return; }
-  cn = [null, null];
+  cn = [null, null]; iq = [null, null];
   const useRegion = regionOn();
-  if (isImplicitEq(src1)) {
-    try { cn[0] = conicCompile(src1); infoLines.push("式1: " + cn[0].name); }
-    catch (e) { $("graphMsg").textContent = "式1がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; $("exprInfo").textContent = ""; drawGraph(); refreshRegionUI(); return; }
-  } else {
-    try { info1 = compileLatex(src1); fn = info1.f; infoLines.push("式1: y = " + info1.expr); }
-    catch (e) { $("graphMsg").textContent = "式1がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; $("exprInfo").textContent = ""; drawGraph(); refreshRegionUI(); return; }
-  }
-  if (useRegion) {
-    if (useG()) {
-      const src2 = $("latex2").value.trim();
-      if (!src2) { if (!(cn[0] && (cn[0].kind === "ellipse" || cn[0].kind === "circle"))) { $("graphMsg").textContent = "式2を入力してください(式1だけ表示中)"; $("graphMsg").className = "msg err"; } }
-      else if (isImplicitEq(src2)) {
-        try { cn[1] = conicCompile(src2); infoLines.push("式2: " + cn[1].name); }
-        catch (e) { $("graphMsg").textContent = "式2がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; }
-      }
+  const compileSlot = (src, k) => { // k=0: 式1, k=1: 式2。エラーのとき false
+    const nm = "式" + (k + 1);
+    try {
+      if (isIneqSrc(src)) { iq[k] = ineqCompile(src); infoLines.push(nm + ": 不等式"); }
+      else if (isImplicitEq(src)) { cn[k] = conicCompile(src); infoLines.push(nm + ": " + cn[k].name); }
       else {
-        try { info2 = compileLatex(src2); fn2 = info2.f; infoLines.push("式2: y = " + info2.expr); }
-        catch (e) { $("graphMsg").textContent = "式2がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; }
+        const inf = compileLatex(src);
+        if (k === 0) { info1 = inf; fn = inf.f; } else { info2 = inf; fn2 = inf.f; }
+        infoLines.push(nm + ": y = " + inf.expr);
       }
-    } else { fn2 = () => 0; info2 = { rhs: "0" }; }
+      return true;
+    } catch (e) { $("graphMsg").textContent = nm + "がグラフにできません: " + e.message; $("graphMsg").className = "msg err"; return false; }
+  };
+  if (!compileSlot(src1, 0)) { $("exprInfo").textContent = ""; drawGraph(); refreshRegionUI(); return; }
+  const wantSecond = (useRegion && useG()) || !!iq[0];
+  if (wantSecond) {
+    const src2 = $("latex2").value.trim();
+    if (!src2) { if (useRegion && useG() && !iq[0] && !(cn[0] && (cn[0].kind === "ellipse" || cn[0].kind === "circle"))) { $("graphMsg").textContent = "式2を入力してください(式1だけ表示中)"; $("graphMsg").className = "msg err"; } }
+    else compileSlot(src2, 1);
+  } else if (useRegion) { fn2 = () => 0; info2 = { rhs: "0" }; }
+  if (useRegion && !iq[0] && !iq[1] && (cn[0] || cn[1])) {
     const ellOne = (isEll(cn[0]) && !cn[1]) || (isEll(cn[1]) && !cn[0]);
-    const wholeOnly = ellOne;
-    if ((cn[0] || cn[1]) && !wholeOnly) { $("graphMsg").textContent = "この組み合わせの面積は未対応です。円・楕円1つと、y=g(x) の式(または式2を空)の組み合わせで使えます"; $("graphMsg").className = "msg"; }
+    if (!ellOne) { $("graphMsg").textContent = "この組み合わせの面積は未対応です。円・楕円1つと、y=g(x) の式(または式2を空)の組み合わせで使えます"; $("graphMsg").className = "msg"; }
   }
   { const el = cn.find(q => q && (q.kind === "ellipse" || q.kind === "circle"));
     if (el && isInitialView()) {
@@ -2140,6 +2231,7 @@ function renderConicResult() {
 }
 function renderResult() {
   const box = $("resMath"), wrapBox = $("result");
+  if (ineqActive()) { renderIneqResult(); return; }
   if (cutSetup()) { renderConicCutResult(); return; }
   if (conicWhole()) { renderConicResult(); return; }
   if (!regionOn() || !region || !region.ok || !info1 || !info2) {
@@ -2208,6 +2300,16 @@ function renderSteps() {
   box.hidden = !on; box.innerHTML = "";
   $("nfBox").hidden = !(on && region && region.ok && region.exact && region.exact.kind === "surd" && region.interior.length === 0);
   if (!on) return;
+  if (ineqActive()) {
+    $("nfBox").hidden = true;
+    if (ineqXonlyMode()) ineqXSteps(iq[0]).forEach(s => {
+      const d = document.createElement("div");
+      if (s.k === "head") d.className = "stephead"; else if (s.k === "cap") d.className = "stepcap"; else if (s.k === "msg") d.className = "stepmsg";
+      if (s.k === "tex") { try { katex.render(s.t, d, { displayMode: true, throwOnError: true, strict: "ignore" }); } catch (e) { d.textContent = s.t; } } else d.textContent = s.t;
+      box.appendChild(d);
+    });
+    return;
+  }
   if (cutSetup()) { // 円・楕円とグラフで分けた面積の途中式
     $("nfBox").hidden = true;
     if (!ccut) return;
@@ -3016,6 +3118,124 @@ $("coefStep").addEventListener("change", () => { coefBuildRows(); });
 ["coefGhost", "coefMarks"].forEach(id => $(id).addEventListener("change", drawGraph));
 $("coefReset").onclick = () => { coefVals = coefDefaults(coefKind); coefGhostVals = null; coefLast = -1; coefBuildRows(); coefApply(); };
 $("btnGraph").onclick = () => { drawFromInput(); if (coefOn() && !coefBusy) coefSyncFromFormula(); };
+
+/* ============ 不等式の領域(画面側) ============ */
+const isIneqSrc = s => !!ineqSplit(s);
+function ineqCompile(src) {
+  const sp = ineqSplit(src); if (!sp) throw new Error("不等号(<, >, <=, >=)が見つかりません");
+  const fix = e => e.replace(/(?<![a-zA-Z])y\s*\(/g, "y*(").replace(/\bxy\b/g, "x*y").replace(/(\))\s*([xy])\b/g, "$1*$2");
+  const L = fix(latexToExpr(normalizeInput(sp.lhs))), R = fix(latexToExpr(normalizeInput(sp.rhs)));
+  const code = math.parse("(" + L + ")-(" + R + ")").compile();
+  const g = (x, y) => { const v = code.evaluate({ x, y }); return typeof v === "number" ? v : (v && typeof v.toNumber === "function" ? v.toNumber() : NaN); };
+  const q = ineqClassify(g, sp.op);
+  if (!q) throw new Error("この不等式は未対応です(x, y の1次・2次の式、または y と x の式の形)");
+  if (q.kind === "xonly") {
+    if (!q.co || q.co.length < 3) throw new Error("x だけの不等式は、多項式(整数・分数の係数)の場合に対応しています");
+  }
+  q.lhs = sp.lhs; q.rhs = sp.rhs; q.src = src;
+  if (q.kind === "xonly") q.sol = ineqXSolution(q.co, sp.op);
+  return q;
+}
+const ineqOpTex = op => op === "<=" ? "\\leqq " : op === ">=" ? "\\geqq " : op;
+const ineqActive = () => iq.some(q => q);
+const ineqXonlyMode = () => !!(iq[0] && iq[0].kind === "xonly" && !iq[1]);
+function ineqDash(on) { gctx.setLineDash(on ? [9, 7] : []); }
+function drawIneq(X, Y, W, H) {
+  const act = iq.map((q, i) => q ? { q, i } : null).filter(Boolean);
+  if (!act.length) return;
+  const col = i => fcol[i + 1];
+  if (ineqXonlyMode()) { drawXonly(act[0].q, col(act[0].i), X, Y, W, H); return; }
+  const cell = 3, nx = Math.ceil(W / cell), ny = Math.ceil(H / cell);
+  const sx = (view.xmax - view.xmin) / W, sy = (view.ymax - view.ymin) / H;
+  gctx.save(); gctx.fillStyle = "rgba(46,160,90,0.42)"; gctx.beginPath();
+  for (let cx = 0; cx < nx; cx++) {
+    const x = view.xmin + (cx + 0.5) * cell * sx, tests = act.map(a => ineqCol(a.q, x));
+    let start = -1;
+    for (let cy = 0; cy <= ny; cy++) {
+      let ok = false;
+      if (cy < ny) { const y = view.ymax - (cy + 0.5) * cell * sy; ok = tests.every(t => t(y)); }
+      if (ok && start < 0) start = cy;
+      if (!ok && start >= 0) { gctx.rect(cx * cell - 0.3, start * cell, cell + 0.6, (cy - start) * cell); start = -1; }
+    }
+  }
+  gctx.fill(); gctx.restore();
+  act.forEach(({ q, i }) => { // 境界線: 含むときは実線、含まないときは破線
+    if (q.kind === "yfun") drawCurve(q.h, col(i), X, Y, W, H, false, q.strict);
+    else if (q.kind === "quad") {
+      gctx.save(); gctx.strokeStyle = col(i); gctx.lineWidth = (+$("curveW").value || 2.5) * ZF; gctx.lineCap = "round"; ineqDash(q.strict);
+      gctx.beginPath(); conicSegs(q.c, view, W, H, 5).forEach(s => { gctx.moveTo(s[0], s[1]); gctx.lineTo(s[2], s[3]); }); gctx.stroke(); gctx.restore();
+    }
+  });
+}
+const XON = "rgba(22,150,80,0.95)";
+function drawXonly(q, color, X, Y, W, H) { // 2次不等式: グラフ y=G(x) の解の部分を太く、x軸上の範囲も同じ色で
+  drawCurve(q.G, color, X, Y, W, H, false, false);
+  const lw = (+$("curveW").value || 2.5) * ZF, ay = Y(0), fs = tickFs();
+  gctx.save(); gctx.lineCap = "butt"; gctx.strokeStyle = XON;
+  q.sol.intervals.forEach(v => {
+    const a = v.lo === null ? view.xmin : Math.max(v.lo, view.xmin), b = v.hi === null ? view.xmax : Math.min(v.hi, view.xmax);
+    if (!(b > a)) return;
+    gctx.lineWidth = lw * 2.4; gctx.beginPath(); gctx.moveTo(X(a), ay); gctx.lineTo(X(b), ay); gctx.stroke(); // x軸上の範囲
+    gctx.lineWidth = lw * 2.2; gctx.beginPath(); let pen = false;
+    const n = Math.ceil((X(b) - X(a)) / 2);
+    for (let k = 0; k <= n; k++) { const x = a + (b - a) * k / n, y = safeCall(q.G, x); if (!isFinite(y)) { pen = false; continue; } const py = Y(y); if (Math.abs(py) > H * 5) { pen = false; continue; } if (!pen) { gctx.moveTo(X(x), py); pen = true; } else gctx.lineTo(X(x), py); }
+    gctx.stroke();
+  });
+  const lab = makeLabeler(q.G, q.G);
+  q.sol.roots.forEach(r => { // 端点: 含むとき ●、含まないとき ○
+    if (r < view.xmin || r > view.xmax) return;
+    const inc = q.sol.intervals.some(v => (v.lo === r && v.loInc) || (v.hi === r && v.hiInc) || (v.lo === r && v.hi === r));
+    gctx.beginPath(); gctx.arc(X(r), ay, 7 * ZF, 0, Math.PI * 2); gctx.fillStyle = inc ? XON : "#fff"; gctx.fill(); gctx.lineWidth = 3; gctx.strokeStyle = XON; gctx.stroke();
+    gctx.font = fs + "px sans-serif"; gctx.fillStyle = "#116b3a"; gctx.textAlign = "center"; gctx.textBaseline = "alphabetic";
+    const bx = mlBox(gctx, lab.x(r), fs); mlDraw(gctx, bx, X(r), ay - 14 * ZF - bx.desc, "center");
+  });
+  gctx.restore();
+}
+function ineqAreaInfo() { // 円・楕円の内側 と 1次不等式 の共通部分の面積(あれば)
+  const E = iq.find(q => q && q.kind === "quad" && (q.cl.kind === "ellipse" || q.cl.kind === "circle") && q.sense === "<");
+  const L = iq.find(q => q && q.kind === "yfun" && q.hco && q.hco.length <= 2);
+  if (E && !L && iq.filter(Boolean).length === 1) { const ai = conicAreaInfo(E.c); return ai ? { val: ai.val, tex: ai.q ? conicAreaTexVal(E.c, ai) : null } : null; }
+  if (E && L && iq.filter(Boolean).length === 2) {
+    const r = ellipseCut(E.c, L.h, L.hco); if (!r) return null;
+    const v = L.sense === ">" ? r.up : r.low, e = r.nice ? fitExact(v) : null;
+    return { val: v, tex: e ? e.tex : null };
+  }
+  return null;
+}
+function renderIneqResult() {
+  const box = $("resMath"), wrapBox = $("result");
+  wrapBox.classList.remove("empty"); $("stepsBar").hidden = !ineqXonlyMode(); $("nfBox").hidden = true;
+  const lines = [];
+  iq.forEach((q, i) => { if (q) lines.push(q.lhs + ineqOpTex(q.op) + q.rhs); });
+  let tex = "\\begin{aligned}" + lines.map(l => "&" + l).join("\\\\");
+  const notes = [];
+  if (ineqXonlyMode()) {
+    const q = iq[0], lab = makeLabeler(q.G, q.G);
+    tex += "\\\\ &\\Longrightarrow\\ \\ " + ineqIntervalsTex(q.sol, lab);
+    $("resNote").textContent = "グラフ y=" + polyTexPlain(q) + " が x 軸より" + (q.sense === "<" ? "下" : "上") + "にある x の範囲が解です(緑)。" + (q.strict ? "端点は含みません(○)。" : "端点を含みます(●)。");
+  } else {
+    iq.forEach((q, i) => { if (q) notes.push(["式" + (i + 1), q.strict ? "境界線を含まない(破線)" : "境界線を含む(実線)"]); });
+    const ar = ineqAreaInfo();
+    if (ar) tex += "\\\\ &S=" + (ar.tex ? ar.tex + "\\approx " : "\\approx ") + decTex(ar.val);
+    $("resNote").textContent = "緑の部分が領域です。" + notes.map(n => n[0] + ": " + n[1]).join(" / ") + "。" + (ar ? "S は領域の面積です。" : "");
+  }
+  tex += "\\end{aligned}";
+  try { katex.render(tex, box, { displayMode: true, throwOnError: true, strict: "ignore" }); } catch (e) { box.textContent = lines.join(" / "); }
+  $("regionMsg").textContent = ""; renderSteps();
+}
+function polyTexPlain(q) { return q.co ? polyTexX(q.co, "x").replace(/[{}]/g, "") : "(左辺−右辺)"; }
+function ineqXSteps(q) {
+  const out = [], lab = makeLabeler(q.G, q.G), co = q.co;
+  const op = ineqOpTex(q.op), cap = t => out.push({ k: "cap", t }), tx = t => out.push({ k: "tex", t }), hd = t => out.push({ k: "head", t }), ms = t => out.push({ k: "msg", t });
+  hd("【2次不等式の解き方】");
+  cap("すべての項を左辺に移して整理します"); tx(polyTexX(co, "x") + op + "0");
+  cap("左辺を y=f(x) とおいて、グラフと x 軸の交点(f(x)=0 の解)を求めます");
+  const r = interStepsTex(co, [qZero()], polyTexX(co, "x"), "0", { first: "f(x)=0 を解く", last: "解(小さい順)" });
+  if (r) { r.steps.forEach(s => { cap(s.cap); if (s.tex) tx(s.tex); }); if (r.note) ms(r.note); }
+  cap("グラフが x 軸より" + (q.sense === "<" ? "下側(f(x)<0)" : "上側(f(x)>0)") + "にある x の範囲を読みとります" + (q.strict ? "(端点は含みません)" : "(端点を含みます)"));
+  tx(ineqIntervalsTex(q.sol, lab));
+  return out;
+}
 
 /* ============ 極値・変曲点(画面側) ============ */
 let extInfo = null, extDotList = [];

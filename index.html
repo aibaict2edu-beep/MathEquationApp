@@ -153,7 +153,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v33</span>
+    <span style="font-size:12px;opacity:.85">試作版 v34</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -3099,7 +3099,8 @@ function computeTf() {
     } catch (e) {}
     const y0 = safeCall(f, 0); if (isFinite(y0) && !pts.some(t => Math.abs(t.x) < 1e-9)) pts.push({ x: 0, y: y0, name: "y切片" });
     pts.forEach(t => { t.X = p + sx * kx * t.x; t.Y = q + sy * ky * t.y; });
-    tfInfo = { p, q, kx, ky, sx, sy, pts };
+    const eps = 1e-12;
+    tfInfo = { p, q, kx, ky, sx, sy, pts, moved: Math.abs(p) > eps || Math.abs(q) > eps || sx < 0 || sy < 0 || Math.abs(kx - 1) > eps || Math.abs(ky - 1) > eps };
   }
   renderTf();
 }
@@ -3136,7 +3137,8 @@ function tfDrawLabels(X, Y, W, H) { // 頂点の座標を、線や矢印・他�
 }
 function drawTf(X, Y, W, H) {
   drawCurve(tfFn, tfColor(), X, Y, W, H, false, false);
-  if (!tfInfo || !$("tfArrows").checked) { if (tfInfo && $("tfLabels").checked) tfDrawLabels(X, Y, W, H); return; }
+  if (!tfInfo || !tfInfo.moved) return; // 動かしていないときは、矢印も座標も出さない
+  if (!$("tfArrows").checked) { if ($("tfLabels").checked) tfDrawLabels(X, Y, W, H); return; }
   gctx.save(); gctx.lineWidth = 2; gctx.setLineDash([4, 4]);
   tfInfo.pts.forEach(t => {
     const x0 = X(t.x), y0 = Y(t.y), x1 = X(t.X), y1 = Y(t.Y);

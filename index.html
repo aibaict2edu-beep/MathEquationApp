@@ -153,7 +153,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v32</span>
+    <span style="font-size:12px;opacity:.85">試作版 v33</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -328,7 +328,7 @@
           <h2 class="subh">拡大・縮小</h2>
           <div class="crow" data-step="0.25"><span class="cname tfn">x方向 ×</span><button type="button" class="cm" aria-label="x方向の倍率を小さく">−</button><input type="range" min="0.25" max="5" step="0.25" value="1"><button type="button" class="cp" aria-label="x方向の倍率を大きく">＋</button><input type="text" class="cnum" id="tfKx" inputmode="decimal" value="1"></div>
           <div class="crow" data-step="0.25"><span class="cname tfn">y方向 ×</span><button type="button" class="cm" aria-label="y方向の倍率を小さく">−</button><input type="range" min="0.25" max="5" step="0.25" value="1"><button type="button" class="cp" aria-label="y方向の倍率を大きく">＋</button><input type="text" class="cnum" id="tfKy" inputmode="decimal" value="1"></div>
-          <div class="row"><label><input type="checkbox" id="tfArrows" checked> 対応する点を結ぶ</label><button id="tfReset">もとに戻す</button></div>
+          <div class="row"><label><input type="checkbox" id="tfArrows" checked> 対応する点を結ぶ</label><label><input type="checkbox" id="tfLabels"> 頂点の座標を表示</label><button id="tfReset">もとに戻す</button></div>
           <div id="tfOut"></div>
         </div>
       </div>
@@ -3103,9 +3103,40 @@ function computeTf() {
   }
   renderTf();
 }
+const tfLabPrev = {};
+function tfDrawLabels(X, Y, W, H) { // 頂点の座標を、線や矢印・他のラベルと重ならない場所に書く
+  const vs = tfInfo.pts.filter(t => t.name === "極大" || t.name === "極小");
+  if (!vs.length) return;
+  const obs = []; // 重なると困る点 [x, y, 重み]
+  const addCurve = f => { for (let px = 0; px <= W; px += 4) { const x = view.xmin + (view.xmax - view.xmin) * px / W, y = safeCall(f, x); if (isFinite(y)) { const py = Y(y); if (py > -50 && py < H + 50) obs.push([px, py, 1]); } } };
+  addCurve(fn); addCurve(tfFn);
+  if ($("tfArrows").checked) tfInfo.pts.forEach(t => { const x0 = X(t.x), y0 = Y(t.y), x1 = X(t.X), y1 = Y(t.Y), n = Math.max(2, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 6)); for (let i = 0; i <= n; i++) obs.push([x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, 1]); });
+  { const ax = X(0), ay = Y(0); for (let px = 0; px <= W; px += 8) obs.push([px, ay, 0.25]); for (let py = 0; py <= H; py += 8) obs.push([ax, py, 0.25]); }
+  vs.forEach(t => [[t.x, t.y], [t.X, t.Y]].forEach(([x, y]) => obs.push([X(x), Y(y), 3, 7])));
+  const fs = tickFs(), placed = [];
+  gctx.save(); gctx.font = fs + "px sans-serif"; gctx.textAlign = "left"; gctx.textBaseline = "alphabetic";
+  const items = [];
+  vs.forEach((t, k) => { items.push({ key: "o" + k, x: t.x, y: t.y, col: fcol[1] }); items.push({ key: "m" + k, x: t.X, y: t.Y, col: tfColor() }); });
+  items.forEach(it => {
+    const px = X(it.x), py = Y(it.y);
+    if (px < -5 || px > W + 5 || py < -5 || py > H + 5) return;
+    const txt = "(" + fmtX(it.x) + ", " + fmtX(it.y) + ")", bx = mlBox(gctx, txt, fs), w = bx.w, hgt = bx.asc + bx.desc, d = 11;
+    const cands = [[d, -d - hgt], [-d - w, -d - hgt], [d, d], [-d - w, d], [d + 14, -hgt / 2], [-d - w - 14, -hgt / 2], [-w / 2, -d - hgt - 8], [-w / 2, d + 8]];
+    const rects = cands.map(c => { let l = px + c[0], t0 = py + c[1]; l = Math.max(2, Math.min(W - w - 2, l)); t0 = Math.max(2, Math.min(H - hgt - 2, t0)); return [l, t0, l + w, t0 + hgt]; });
+    const cost = r => { let s = 0; obs.forEach(o => { if (o[0] > r[0] - 3 && o[0] < r[2] + 3 && o[1] > r[1] - 3 && o[1] < r[3] + 3) s += o[2]; }); placed.forEach(q => { if (r[0] < q[2] + 3 && r[2] > q[0] - 3 && r[1] < q[3] + 3 && r[3] > q[1] - 3) s += 5; }); return s; };
+    const costs = rects.map(cost); let best = 0;
+    costs.forEach((c, i) => { if (c < costs[best]) best = i; });
+    const pv = tfLabPrev[it.key]; if (pv !== undefined && costs[pv] <= costs[best] + 0.01) best = pv; // 動かしている間は位置を変えない
+    tfLabPrev[it.key] = best;
+    const r = rects[best]; placed.push(r);
+    gctx.fillStyle = "rgba(255,255,255,0.85)"; gctx.fillRect(r[0] - 2, r[1] - 1, w + 4, hgt + 2);
+    gctx.fillStyle = it.col; mlDraw(gctx, bx, r[0], r[1] + bx.asc, "left");
+  });
+  gctx.restore();
+}
 function drawTf(X, Y, W, H) {
   drawCurve(tfFn, tfColor(), X, Y, W, H, false, false);
-  if (!tfInfo || !$("tfArrows").checked) return;
+  if (!tfInfo || !$("tfArrows").checked) { if (tfInfo && $("tfLabels").checked) tfDrawLabels(X, Y, W, H); return; }
   gctx.save(); gctx.lineWidth = 2; gctx.setLineDash([4, 4]);
   tfInfo.pts.forEach(t => {
     const x0 = X(t.x), y0 = Y(t.y), x1 = X(t.X), y1 = Y(t.Y);
@@ -3121,6 +3152,7 @@ function drawTf(X, Y, W, H) {
     gctx.setLineDash([4, 4]);
   });
   gctx.restore();
+  if ($("tfLabels").checked) tfDrawLabels(X, Y, W, H);
 }
 function tfSubst(rhs, p, kx, sx) { // f の式の x を、置きかえた形にする
   const nz = v => Math.abs(v) > 1e-12;
@@ -3177,7 +3209,7 @@ function tfRowsSync() {
       ["pointerup", "pointercancel", "pointerleave"].forEach(ev => b.addEventListener(ev, stop));
     });
   });
-  ["tfMode", "tfSx", "tfSy", "tfArrows"].forEach(id => $(id).addEventListener("change", () => { refreshAll(); }));
+  ["tfMode", "tfSx", "tfSy", "tfArrows", "tfLabels"].forEach(id => $(id).addEventListener("change", () => { refreshAll(); }));
   $("tfReset").onclick = () => { ["tfP", "tfQ"].forEach(id => { $(id).value = "0"; }); ["tfKx", "tfKy"].forEach(id => { $(id).value = "1"; }); $("tfSx").checked = false; $("tfSy").checked = false; tfRowsSync(); refreshAll(); };
 })();
 

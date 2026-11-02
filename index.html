@@ -150,7 +150,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v30</span>
+    <span style="font-size:12px;opacity:.85">試作版 v31</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -229,6 +229,14 @@
         <h2>微分</h2>
         <div class="msg">グラフの上のバーで「微分」を選び、曲線の近くをタップすると、その点の微分係数・接線・増減(↗↘0)が出ます。頂点や交点の近くではその点に吸着します。</div>
         <div class="row"><button id="goDiff">微分モードにする</button></div>
+
+        <h2 class="subh">極値・変曲点</h2>
+        <label style="font-size:15px;color:var(--ink)"><input type="checkbox" id="extMode" style="width:20px;height:20px"> 極値・変曲点を調べる(増減表を出す)</label>
+        <div id="extPanel" hidden>
+          <div class="row" id="extTargetRow" hidden><label>対象: <select id="extTarget"><option value="1">式1</option><option value="2">式2</option></select></label></div>
+          <label><input type="checkbox" id="extSteps"> 途中式を詳しく表示</label>
+          <div id="extOut"></div>
+        </div>
 
         <h2 class="subh">積分(面積)</h2>
         <label style="font-size:15px;color:var(--ink)"><input type="checkbox" id="regionMode" style="width:20px;height:20px"> 積分領域モード(囲まれた部分の面積を出す)</label>
@@ -1459,6 +1467,71 @@ function autoY() {
   syncInputs(); refreshAll();
 }
 
+/*EXT_START*/
+/* ============ 極値・変曲点・増減表 ============ */
+function polyDer(co) { const d = co.slice(1).map((c, j) => qMul(c, Q(j + 1, 1))); return d.length ? d : [qZero()]; }
+function extSignAt(g, x) { const v = safeCall(g, x); return !isFinite(v) ? 0 : (v > 1e-9 ? 1 : (v < -1e-9 ? -1 : 0)); }
+function extRoots(g, lo, hi, N) { return findRoots(g, lo, hi, N).sort((a, b) => a - b).filter(x => isFinite(x)); }
+function extAnalyze(f, vlo, vhi) { // f の増減・凹凸。多項式なら厳密(全域)、それ以外は表示範囲内を数値で
+  const co = fitPoly(f, 6), poly = !!(co && co.length >= 2);
+  let df, ddf, dco = null, ddco = null, lo, hi, N;
+  if (poly) {
+    dco = polyDer(co); ddco = polyDer(dco);
+    df = x => polyEvalNum(dco, x); ddf = x => polyEvalNum(ddco, x);
+    let M = 0; const an = Math.abs(qNum(co[co.length - 1])) || 1; co.forEach(c => { M = Math.max(M, Math.abs(qNum(c)) / an); });
+    const R = 1 + M; lo = -R - 1; hi = R + 1; N = 20000;
+  } else {
+    df = x => { const h = 1e-6 * (1 + Math.abs(x)); return (safeCall(f, x + h) - safeCall(f, x - h)) / (2 * h); };
+    ddf = x => { const h = 1e-3 * (1 + Math.abs(x)); return (safeCall(f, x + h) - 2 * safeCall(f, x) + safeCall(f, x - h)) / (h * h); };
+    lo = vlo; hi = vhi; N = 4000;
+  }
+  const build = (g, roots) => { // 区間ごとの符号と、各点の種類
+    const bp = [lo, ...roots, hi], signs = [];
+    for (let i = 0; i + 1 < bp.length; i++) signs.push(extSignAt(g, bp[i] + (bp[i + 1] - bp[i]) * 0.4137));
+    return { roots, signs };
+  };
+  const r1 = extRoots(df, lo, hi, N), a1 = build(df, r1);
+  const crit = r1.map((x, k) => {
+    const sl = a1.signs[k], sr = a1.signs[k + 1], y = safeCall(f, x);
+    return { x, y, kind: sl > 0 && sr < 0 ? "max" : (sl < 0 && sr > 0 ? "min" : "flat") };
+  });
+  const r2 = extRoots(ddf, lo, hi, N), a2 = build(ddf, r2);
+  const infl = [];
+  r2.forEach((x, k) => { if (a2.signs[k] * a2.signs[k + 1] < 0) infl.push({ x, y: safeCall(f, x) }); });
+  const keep2 = r2.filter((x, k) => a2.signs[k] * a2.signs[k + 1] < 0), s2 = [a2.signs[0]];
+  keep2.forEach(x => { const i = r2.indexOf(x); s2.push(a2.signs[i + 1]); });
+  return { poly, co, dco, ddco, df, ddf, crit, signs1: a1.signs, infl, roots2: keep2, signs2: s2 };
+}
+function extYtex(lab, x, y) {
+  if (Math.abs(y) < 1e-12) return "0";
+  const q = qFromFloat(y, 2000, 1e-9); if (q) return texQ(q);
+  const s = lab.tex(x, y), i = s.indexOf(",\\ "); return s.slice(i + 3, s.length - "\\right)".length).replace(/\+0\\sqrt\{\d+\}/g, "");
+}
+function extTableTex(E, lab) { // 増減表
+  const n = E.crit.length, cols = "c|" + "c".repeat(2 * n + 1);
+  const xs = E.crit.map(c => lab.xtex(c.x));
+  const head = ["x", "\\cdots"], d1 = ["f'(x)"], fr = ["f(x)"];
+  const sg = s => s > 0 ? "+" : (s < 0 ? "-" : "?"), ar = s => s > 0 ? "\\nearrow" : (s < 0 ? "\\searrow" : "?");
+  d1.push(sg(E.signs1[0])); fr.push(ar(E.signs1[0]));
+  E.crit.forEach((c, k) => {
+    head.push(xs[k], "\\cdots"); d1.push("0", sg(E.signs1[k + 1]));
+    fr.push(extYtex(lab, c.x, c.y), ar(E.signs1[k + 1]));
+  });
+  return "\\begin{array}{" + cols + "}" + head.join("&") + "\\\\\\hline " + d1.join("&") + "\\\\\\hline " + fr.join("&") + "\\end{array}";
+}
+function extTable2Tex(E, lab2) { // 凹凸表
+  const n = E.infl.length, cols = "c|" + "c".repeat(2 * n + 1);
+  const head = ["x", "\\cdots"], d2 = ["f''(x)"], fr = ["f(x)"];
+  const sg = s => s > 0 ? "+" : (s < 0 ? "-" : "?"), cv = s => s > 0 ? "\\smile" : (s < 0 ? "\\frown" : "?");
+  d2.push(sg(E.signs2[0])); fr.push(cv(E.signs2[0]));
+  E.infl.forEach((c, k) => {
+    head.push(lab2.xtex(c.x), "\\cdots"); d2.push("0", sg(E.signs2[k + 1]));
+    fr.push(extYtex(lab2, c.x, c.y), cv(E.signs2[k + 1]));
+  });
+  return "\\begin{array}{" + cols + "}" + head.join("&") + "\\\\\\hline " + d2.join("&") + "\\\\\\hline " + fr.join("&") + "\\end{array}";
+}
+/*EXT_END*/
+
 /*CONIC_START*/
 /* ============ 円・楕円・双曲線(2次曲線 Ax²+Bxy+Cy²+Dx+Ey+F=0) ============ */
 function conicFitFn(g) { // g(x,y) から係数を求める。2次式でなければ null
@@ -1950,8 +2023,8 @@ function drawFromInput() {
   if (!readInputs()) return;
   refreshAll();
 }
-function refreshAll() { computeRegion(); computeIcpt(); drawGraph(); renderResult(); }
-function refreshRegionUI() { computeRegion(); computeIcpt(); renderResult(); }
+function refreshAll() { computeRegion(); computeIcpt(); computeExt(); drawGraph(); renderResult(); }
+function refreshRegionUI() { computeRegion(); computeIcpt(); computeExt(); renderResult(); }
 
 /* ============ 積分領域 ============ */
 function ivMode() { return document.querySelector("input[name=ivm]:checked").value; }
@@ -2312,6 +2385,7 @@ function visibleDots() {
   const add = p => { if (!out.some(q => Math.abs(q.x - p.x) < 1e-7 * (1 + Math.abs(p.x)) && Math.abs(q.y - p.y) < 1e-7 * (1 + Math.abs(p.y)))) out.push(p); };
   if (regionOn() && region && region.inter) region.inter.forEach(p => add({ x: p.x, y: p.y, label: p.label, xlabel: p.xlabel, col: "#111" }));
   if (fn) icpt.forEach(p => { if ((p.kind === "x" && $("showXi").checked) || (p.kind === "y" && $("showYi").checked)) add(p); });
+  extDotList.forEach(p => out.push(p));
   return out;
 }
 
@@ -2368,7 +2442,7 @@ function drawDots(X, Y, W, H) {
     if (px < -5 || px > W + 5 || py < -5 || py > H + 5) return;
     gctx.beginPath(); gctx.arc(px, py, 5, 0, Math.PI * 2);
     gctx.fillStyle = p.col; gctx.fill(); gctx.lineWidth = 2; gctx.strokeStyle = "#fff"; gctx.stroke();
-    if (all || shownDots.has(dotKey(p.x, p.y))) {
+    if (all || p.always || shownDots.has(dotKey(p.x, p.y))) {
       const cf = tickFs() + 1; gctx.font = cf + "px sans-serif"; gctx.textAlign = "left"; gctx.textBaseline = "alphabetic";
       const bx = mlBox(gctx, p.label, cf), w = bx.w, lx = Math.min(px + 8, W - w - 3), ly = Math.max(py - 8, bx.asc + 2);
       gctx.fillStyle = "rgba(255,255,255,0.8)"; gctx.fillRect(lx - 2, ly - bx.asc, w + 4, bx.asc + bx.desc + 2);
@@ -2914,6 +2988,68 @@ $("coefStep").addEventListener("change", () => { coefBuildRows(); });
 ["coefGhost", "coefMarks"].forEach(id => $(id).addEventListener("change", drawGraph));
 $("coefReset").onclick = () => { coefVals = coefDefaults(coefKind); coefGhostVals = null; coefLast = -1; coefBuildRows(); coefApply(); };
 $("btnGraph").onclick = () => { drawFromInput(); if (coefOn() && !coefBusy) coefSyncFromFormula(); };
+
+/* ============ 極値・変曲点(画面側) ============ */
+let extInfo = null, extDotList = [];
+function extTarget() { return ($("extTarget").value === "2" && fn2 && useG()) ? { f: fn2, info: info2, n: 2, col: fcol[2] } : { f: fn, info: info1, n: 1, col: fcol[1] }; }
+function computeExt() {
+  const on = $("extMode").checked;
+  $("extPanel").hidden = !on; $("extTargetRow").hidden = !(fn2 && useG());
+  extInfo = null; extDotList = [];
+  if (!on) return;
+  const T = extTarget();
+  if (T.f) { extInfo = extAnalyze(T.f, view.xmin, view.xmax); extInfo.T = T; extDotList = extDots(); }
+  renderExt();
+}
+function extDots() {
+  if (!extInfo) return [];
+  const E = extInfo, f = E.T.f, out = [];
+  const lab = makeLabeler(f, E.df), lab2 = makeLabeler(f, E.ddf);
+  E.crit.forEach(c => { if (c.kind === "flat" || !isFinite(c.y)) return; out.push({ x: c.x, y: c.y, label: (c.kind === "max" ? "極大 " : "極小 ") + lab(c.x, c.y), col: "#8e44ad", always: true }); });
+  E.infl.forEach(c => { if (isFinite(c.y)) out.push({ x: c.x, y: c.y, label: "変曲点 " + lab2(c.x, c.y), col: "#0e8a8a", always: true }); });
+  return out;
+}
+function renderExt() {
+  const box = $("extOut"); box.innerHTML = "";
+  if (!$("extMode").checked) return;
+  const mk = (cls, t) => { const d = document.createElement("div"); if (cls) d.className = cls; if (t) d.textContent = t; box.appendChild(d); return d; };
+  const tex = (t, display) => { const d = mk(""); try { katex.render(t, d, { displayMode: !!display, throwOnError: true, strict: "ignore" }); } catch (e) { d.textContent = t; } d.style.overflowX = "auto"; };
+  const show = st => st.forEach(s => { mk("stepcap", s.cap); if (s.tex) tex(s.tex, true); });
+  if (!extInfo) { mk("stepmsg", "式1(または式2)に y=f(x) の式を入れてグラフを描いてください(円・楕円などは対象外です)"); return; }
+  const E = extInfo, f = E.T.f, nm = E.T.n === 2 ? "g" : "f";
+  const fix = t => t.replace(/f'/g, nm + "'").replace(/f\(/g, nm + "(");
+  const lab = makeLabeler(f, E.df), lab2 = makeLabeler(f, E.ddf);
+  const steps = $("extSteps").checked;
+  if (!E.poly) mk("stepmsg", "多項式ではないため、表示範囲の中だけを数値で調べています");
+  if (steps && E.poly) {
+    mk("stephead", "【導関数を求める】");
+    tex(nm + "(x)=" + polyTexX(E.co, "x") + ",\\quad " + nm + "'(x)=" + polyTexX(E.dco, "x") + (E.ddco.length && E.co.length > 2 ? ",\\quad " + nm + "''(x)=" + polyTexX(E.ddco, "x") : ""), true);
+    if (E.dco.length > 1 && !(E.dco.length === 1)) {
+      mk("stephead", "【" + nm + "'(x)=0 を解く】");
+      const r = interStepsTex(E.dco, [qZero()], polyTexX(E.dco, "x"), "0", { first: "極値の候補は " + nm + "'(x)=0 の解", last: "x の値(小さい順)" });
+      if (r) { show(r.steps); if (r.note) mk("stepmsg", r.note); }
+    }
+  }
+  mk("stephead", "【増減表】");
+  tex(extTableTex(E, lab).replace(/f'/g, nm + "'").replace(/f\(x\)/g, nm + "(x)"), true);
+  const ex = E.crit.filter(c => c.kind !== "flat");
+  if (ex.length) ex.forEach(c => tex("x=" + lab.xtex(c.x) + "\\ \\text{で" + (c.kind === "max" ? "極大" : "極小") + "}\\quad\\text{極" + (c.kind === "max" ? "大" : "小") + "値}\\ " + nm + "\\left(" + lab.xtex(c.x) + "\\right)=" + extYtex(lab, c.x, c.y), false));
+  else mk("stepmsg", "極大・極小はありません");
+  if (E.poly && E.co.length <= 2) return;
+  if (steps && E.poly && E.ddco.length > 1) {
+    mk("stephead", "【" + nm + "''(x)=0 を解く】");
+    const r = interStepsTex(E.ddco, [qZero()], polyTexX(E.ddco, "x"), "0", { first: "変曲点の候補は " + nm + "''(x)=0 の解", last: "x の値(小さい順)" });
+    if (r) { show(r.steps); if (r.note) mk("stepmsg", r.note); }
+  }
+  mk("stephead", "【凹凸表】");
+  if (E.infl.length) {
+    tex(extTable2Tex(E, lab2).replace(/f''/g, nm + "''").replace(/f\(x\)/g, nm + "(x)"), true);
+    E.infl.forEach(c => tex("\\text{変曲点}\\ \\left(" + lab2.xtex(c.x) + ",\\ " + extYtex(lab2, c.x, c.y) + "\\right)", false));
+    mk("stepcap", "⌣ は下に凸(f''>0)、⌢ は上に凸(f''<0)");
+  } else mk("stepmsg", "変曲点はありません(" + (E.signs2[0] > 0 ? "下に凸" : E.signs2[0] < 0 ? "上に凸" : "凹凸は変わりません") + ")");
+}
+["extMode", "extTarget"].forEach(id => $(id).addEventListener("change", () => { refreshAll(); }));
+$("extSteps").addEventListener("change", renderExt);
 
 /* ============ 作業の保存・読み込み(ファイル) ============ */
 const WORK_SKIP = new Set(["apiKey", "modelName", "penOnly", "workFile"]);

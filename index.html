@@ -85,7 +85,7 @@
   #resSteps .katex-display { margin:2px 0; text-align:left; }
   #resSteps .katex-display > .katex { text-align:left; }
   .tabbar { display:flex; gap:4px; margin:-2px 0 10px; border-bottom:2px solid var(--line); }
-  .tabbtn { flex:1; border-radius:8px 8px 0 0; border-bottom:none; min-height:44px; }
+  .tabbtn { flex:1; border-radius:8px 8px 0 0; border-bottom:none; min-height:44px; padding:6px 2px; font-size:14px; white-space:nowrap; }
   .tabbtn.on { background:var(--accent); color:#fff; border-color:var(--accent); }
   .subh { margin-top:16px; padding-top:10px; border-top:1px solid var(--line); }
   #pad { height:260px; }
@@ -139,6 +139,9 @@
   .crow button { width:44px; min-height:44px; padding:0; font-size:22px; line-height:1; flex:none; }
   .crow input[type=range] { flex:1; min-width:60px; height:32px; }
   .crow .cnum { width:68px; text-align:center; font-size:16px; }
+  .crow .tfn { width:74px; text-align:left; font-size:14px; }
+  #tfOut { margin-top:8px; font-size:14px; }
+  #tfOut .tfline { margin:4px 0; overflow-x:auto; }
   #coefFormula { min-height:50px; font-size:1.3em; justify-content:center; }
   #coefExplain { margin-top:8px; padding:8px 10px; background:#f3f6fd; border-radius:10px; font-size:14px; line-height:1.6; }
   #coefExplain .chg { color:#b45f06; font-weight:600; }
@@ -150,7 +153,7 @@
 <header>
   <h1>手書き数式グラフ</h1>
   <div id="lensWrap">
-    <span style="font-size:12px;opacity:.85">試作版 v31</span>
+    <span style="font-size:12px;opacity:.85">試作版 v32</span>
     <button id="btnLens" type="button" aria-label="画面を拡大する">🔍</button>
     <div id="lensMenu" hidden>
       <button type="button" data-z="1">100%</button>
@@ -201,6 +204,7 @@
         <button class="tabbtn on" data-tab="draw">手書き</button>
         <button class="tabbtn" data-tab="analysis">解析</button>
         <button class="tabbtn" data-tab="coef">係数</button>
+        <button class="tabbtn" data-tab="tf">変換</button>
         <button class="tabbtn" data-tab="view">表示</button>
         <button class="tabbtn" data-tab="settings">設定</button>
       </div>
@@ -304,6 +308,28 @@
           <div class="row"><button id="coefReset">初期値に戻す</button></div>
           <div id="coefExplain"></div>
           <div class="msg" id="coefMsg"></div>
+        </div>
+      </div>
+
+      <div class="tabpanel" data-tab="tf" hidden>
+        <h2>グラフを動かして、元のグラフと比べる</h2>
+        <label style="font-size:15px;color:var(--ink)"><input type="checkbox" id="tfMode" style="width:20px;height:20px"> 変換モード(式1を変換して重ねて表示)</label>
+        <div class="msg">式1の y=f(x) を、対称移動 → 拡大縮小 → 平行移動 の順に変えたグラフ(青)を、元のグラフ(点線)に重ねます。</div>
+        <div id="tfPanel" hidden>
+          <h2 class="subh">平行移動</h2>
+          <div class="crow" data-step="0.5"><span class="cname tfn">x方向 p</span><button type="button" class="cm" aria-label="pを小さく">−</button><input type="range" min="-10" max="10" step="0.5" value="0"><button type="button" class="cp" aria-label="pを大きく">＋</button><input type="text" class="cnum" id="tfP" inputmode="decimal" value="0"></div>
+          <div class="crow" data-step="0.5"><span class="cname tfn">y方向 q</span><button type="button" class="cm" aria-label="qを小さく">−</button><input type="range" min="-10" max="10" step="0.5" value="0"><button type="button" class="cp" aria-label="qを大きく">＋</button><input type="text" class="cnum" id="tfQ" inputmode="decimal" value="0"></div>
+          <h2 class="subh">対称移動</h2>
+          <div class="row">
+            <label><input type="checkbox" id="tfSy"> x軸に関して対称(y→−y)</label>
+            <label><input type="checkbox" id="tfSx"> y軸に関して対称(x→−x)</label>
+          </div>
+          <div class="msg">2つとも入れると、原点に関する対称移動になります。</div>
+          <h2 class="subh">拡大・縮小</h2>
+          <div class="crow" data-step="0.25"><span class="cname tfn">x方向 ×</span><button type="button" class="cm" aria-label="x方向の倍率を小さく">−</button><input type="range" min="0.25" max="5" step="0.25" value="1"><button type="button" class="cp" aria-label="x方向の倍率を大きく">＋</button><input type="text" class="cnum" id="tfKx" inputmode="decimal" value="1"></div>
+          <div class="crow" data-step="0.25"><span class="cname tfn">y方向 ×</span><button type="button" class="cm" aria-label="y方向の倍率を小さく">−</button><input type="range" min="0.25" max="5" step="0.25" value="1"><button type="button" class="cp" aria-label="y方向の倍率を大きく">＋</button><input type="text" class="cnum" id="tfKy" inputmode="decimal" value="1"></div>
+          <div class="row"><label><input type="checkbox" id="tfArrows" checked> 対応する点を結ぶ</label><button id="tfReset">もとに戻す</button></div>
+          <div id="tfOut"></div>
         </div>
       </div>
 
@@ -1272,7 +1298,8 @@ function fmtX(x) { // 分数で表せれば分数、なければ小数
   if (q) return q.d > 1 ? q.n + "/" + q.d : String(q.n);
   return String(+x.toPrecision(4));
 }
-function drawCurve(f, color, X, Y, W, H, asym) {
+function drawCurve(f, color, X, Y, W, H, asym, dash) {
+  gctx.save(); if (dash) gctx.setLineDash([9, 7]);
   gctx.strokeStyle = color; gctx.lineWidth = (+$("curveW").value || 2.5) * ZF; gctx.lineJoin = "round";
   gctx.beginPath();
   let pen = false, prevPy = 0, havePrev = false, xPrev = 0, yPrev = 0;
@@ -1291,7 +1318,7 @@ function drawCurve(f, color, X, Y, W, H, asym) {
     if (!pen) { gctx.moveTo(px, py); pen = true; } else gctx.lineTo(px, py);
     prevPy = py;
   }
-  gctx.stroke();
+  gctx.stroke(); gctx.restore();
   if (jumps.length) {
     gctx.save(); gctx.setLineDash([6, 5]); gctx.strokeStyle = "#9aa5b8"; gctx.lineWidth = 1.3;
     jumps.forEach(jx => { gctx.beginPath(); gctx.moveTo(jx, 0); gctx.lineTo(jx, H); gctx.stroke(); });
@@ -1413,7 +1440,8 @@ function drawGraph() {
   drawShade(X, Y, W, H);
   const isTan = inf => !!(inf && inf.expr && /\btan\(/.test(inf.expr));
   drawCoefGhost(X, Y, W, H);
-  if (fn) drawCurve(fn, fcol[1], X, Y, W, H, isTan(info1));
+  if (fn) drawCurve(fn, fcol[1], X, Y, W, H, isTan(info1), !!tfFn);
+  if (tfFn) drawTf(X, Y, W, H);
   if (fn2 && useG()) drawCurve(fn2, fcol[2], X, Y, W, H, isTan(info2));
   { const S = cutSetup();
     if (S && ccut) {
@@ -2023,8 +2051,8 @@ function drawFromInput() {
   if (!readInputs()) return;
   refreshAll();
 }
-function refreshAll() { computeRegion(); computeIcpt(); computeExt(); drawGraph(); renderResult(); }
-function refreshRegionUI() { computeRegion(); computeIcpt(); computeExt(); renderResult(); }
+function refreshAll() { computeRegion(); computeIcpt(); computeExt(); computeTf(); drawGraph(); renderResult(); }
+function refreshRegionUI() { computeRegion(); computeIcpt(); computeExt(); computeTf(); renderResult(); }
 
 /* ============ 積分領域 ============ */
 function ivMode() { return document.querySelector("input[name=ivm]:checked").value; }
@@ -3051,6 +3079,108 @@ function renderExt() {
 ["extMode", "extTarget"].forEach(id => $(id).addEventListener("change", () => { refreshAll(); }));
 $("extSteps").addEventListener("change", renderExt);
 
+/* ============ 変換モード(平行移動・対称移動・拡大縮小) ============ */
+let tfFn = null, tfInfo = null;
+const tfOn = () => $("tfMode").checked;
+function tfNum(id, def) { const s = String($(id).value).replace(/[０-９．－]/g, ch => ({ "．": ".", "－": "-" }[ch] || String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))); const v = parseFloat(s); return isFinite(v) ? v : def; }
+function tfColor() { return fcol[1] === "#2457d6" ? "#d62d2d" : "#2457d6"; }
+function computeTf() {
+  $("tfPanel").hidden = !tfOn();
+  tfFn = null; tfInfo = null;
+  if (tfOn() && fn) {
+    const p = tfNum("tfP", 0), q = tfNum("tfQ", 0), kx = Math.max(0.01, tfNum("tfKx", 1)), ky = Math.max(0.01, tfNum("tfKy", 1));
+    const sx = $("tfSx").checked ? -1 : 1, sy = $("tfSy").checked ? -1 : 1;
+    const f = fn;
+    tfFn = x => q + sy * ky * safeCall(f, sx * (x - p) / kx);
+    const pts = [];
+    try {
+      const E = extAnalyze(f, view.xmin, view.xmax);
+      E.crit.forEach(c => { if (c.kind !== "flat" && isFinite(c.y) && pts.length < 3) pts.push({ x: c.x, y: c.y, name: c.kind === "max" ? "極大" : "極小" }); });
+    } catch (e) {}
+    const y0 = safeCall(f, 0); if (isFinite(y0) && !pts.some(t => Math.abs(t.x) < 1e-9)) pts.push({ x: 0, y: y0, name: "y切片" });
+    pts.forEach(t => { t.X = p + sx * kx * t.x; t.Y = q + sy * ky * t.y; });
+    tfInfo = { p, q, kx, ky, sx, sy, pts };
+  }
+  renderTf();
+}
+function drawTf(X, Y, W, H) {
+  drawCurve(tfFn, tfColor(), X, Y, W, H, false, false);
+  if (!tfInfo || !$("tfArrows").checked) return;
+  gctx.save(); gctx.lineWidth = 2; gctx.setLineDash([4, 4]);
+  tfInfo.pts.forEach(t => {
+    const x0 = X(t.x), y0 = Y(t.y), x1 = X(t.X), y1 = Y(t.Y);
+    gctx.strokeStyle = "#7a8599"; gctx.fillStyle = "#7a8599";
+    if (Math.hypot(x1 - x0, y1 - y0) > 12) {
+      gctx.beginPath(); gctx.moveTo(x0, y0); gctx.lineTo(x1, y1); gctx.stroke();
+      const a = Math.atan2(y1 - y0, x1 - x0); gctx.setLineDash([]);
+      gctx.beginPath(); gctx.moveTo(x1, y1); gctx.lineTo(x1 - 12 * Math.cos(a - 0.4), y1 - 12 * Math.sin(a - 0.4)); gctx.lineTo(x1 - 12 * Math.cos(a + 0.4), y1 - 12 * Math.sin(a + 0.4)); gctx.closePath(); gctx.fill(); gctx.setLineDash([4, 4]);
+    }
+    gctx.setLineDash([]);
+    gctx.beginPath(); gctx.arc(x0, y0, 5, 0, Math.PI * 2); gctx.fillStyle = "#fff"; gctx.fill(); gctx.strokeStyle = fcol[1]; gctx.lineWidth = 2.5; gctx.stroke();
+    gctx.beginPath(); gctx.arc(x1, y1, 5.5, 0, Math.PI * 2); gctx.fillStyle = tfColor(); gctx.fill(); gctx.strokeStyle = "#fff"; gctx.lineWidth = 2; gctx.stroke();
+    gctx.setLineDash([4, 4]);
+  });
+  gctx.restore();
+}
+function tfSubst(rhs, p, kx, sx) { // f の式の x を、置きかえた形にする
+  const nz = v => Math.abs(v) > 1e-12;
+  const xp = nz(p) ? "\\left(x" + (p > 0 ? "-" : "+") + numTex(Math.abs(p)) + "\\right)" : "x";
+  const inner = (sx < 0 ? "-" : "") + (Math.abs(kx - 1) > 1e-12 ? "\\frac{" + xp + "}{" + numTex(kx) + "}" : xp);
+  const arg = (inner === "x" || (sx > 0 && Math.abs(kx - 1) <= 1e-12)) ? inner : "\\left(" + inner + "\\right)";
+  return rhs.replace(/(?<![a-zA-Z\\])x(?![a-zA-Z])/g, () => arg);
+}
+function renderTf() {
+  const box = $("tfOut"); box.innerHTML = "";
+  if (!tfOn()) return;
+  const mk = (cls, t) => { const d = document.createElement("div"); d.className = cls; if (t) d.textContent = t; box.appendChild(d); return d; };
+  const tex = (t, display) => { const d = mk("tfline"); try { katex.render(t, d, { displayMode: !!display, throwOnError: true, strict: "ignore" }); } catch (e) { d.textContent = t; } };
+  if (!tfInfo) { mk("stepmsg", "式1に y=f(x) の式を入れて、グラフを描いてください"); return; }
+  const T = tfInfo, nz = v => Math.abs(v) > 1e-12;
+  const steps = [];
+  if (T.sy < 0) steps.push("x軸に関して対称移動");
+  if (T.sx < 0) steps.push("y軸に関して対称移動");
+  if (nz(T.kx - 1)) steps.push("x軸方向に " + decTex(T.kx) + " 倍");
+  if (nz(T.ky - 1)) steps.push("y軸方向に " + decTex(T.ky) + " 倍");
+  if (nz(T.p) || nz(T.q)) steps.push("x軸方向に " + decTex(T.p) + "、y軸方向に " + decTex(T.q) + " 平行移動");
+  mk("stephead", "【どう動かしたか】");
+  mk("stepcap", steps.length ? steps.join(" → ") : "元のグラフと同じです(まだ動かしていません)");
+  const rhs = (info1 && info1.rhs ? info1.rhs : "f(x)").replace(/(?<![\\a-zA-Z])(sin|cos|tan|log|ln|exp)(?![a-zA-Z])/g, "\\$1");
+  mk("stephead", "【変換後の式】");
+  mk("stepcap", "x を (x−p) などに、y を (y−q) などに置きかえます");
+  const coef = (T.sy < 0 ? "-" : "") + (nz(T.ky - 1) ? numTex(T.ky) : "");
+  const yl = nz(T.q) ? "y" + (T.q > 0 ? "-" : "+") + numTex(Math.abs(T.q)) : "y";
+  const sub = tfSubst(rhs, T.p, T.kx, T.sx);
+  const body = coef ? coef + "\\left(" + sub + "\\right)" : sub;
+  tex(yl + "=" + body, true);
+  const co = fitPoly(tfFn, 6);
+  if (co && steps.length) tex("y=" + polyTexX(co, "x"), true);
+  else if (!co) mk("stepmsg", "式を展開できないため、置きかえた形のままです");
+  if (T.pts.length) {
+    mk("stephead", "【対応する点】");
+    T.pts.forEach(t => tex("\\text{" + t.name + "}\\ \\left(" + numTex(t.x) + ",\\ " + numTex(t.y) + "\\right)\\ \\to\\ \\left(" + numTex(t.X) + ",\\ " + numTex(t.Y) + "\\right)", false));
+  }
+}
+function tfRowsSync() {
+  document.querySelectorAll('.tabpanel[data-tab="tf"] .crow').forEach(r => { const rg = r.querySelector("input[type=range]"), nm = r.querySelector(".cnum"); const v = parseFloat(nm.value); if (isFinite(v)) rg.value = v; });
+}
+(function () {
+  document.querySelectorAll('.tabpanel[data-tab="tf"] .crow').forEach(r => {
+    const rg = r.querySelector("input[type=range]"), nm = r.querySelector(".cnum"), st = +r.dataset.step || 1;
+    const setV = v => { v = Math.round(v / st * 1000) / 1000 * st; nm.value = String(+v.toFixed(4)); rg.value = v; refreshAll(); };
+    rg.addEventListener("input", () => { nm.value = rg.value; refreshAll(); });
+    nm.addEventListener("change", () => { const v = tfNum(nm.id, NaN); if (isFinite(v)) { rg.value = v; refreshAll(); } else { nm.value = rg.value; } });
+    [[".cm", -1], [".cp", 1]].forEach(([sel, dir]) => {
+      const b = r.querySelector(sel); let t1 = null, t2 = null;
+      const stop = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
+      const cur = () => tfNum(nm.id, 0);
+      b.addEventListener("pointerdown", e => { e.preventDefault(); setV(cur() + dir * st); t1 = setTimeout(() => { t2 = setInterval(() => setV(cur() + dir * st), 120); }, 400); });
+      ["pointerup", "pointercancel", "pointerleave"].forEach(ev => b.addEventListener(ev, stop));
+    });
+  });
+  ["tfMode", "tfSx", "tfSy", "tfArrows"].forEach(id => $(id).addEventListener("change", () => { refreshAll(); }));
+  $("tfReset").onclick = () => { ["tfP", "tfQ"].forEach(id => { $(id).value = "0"; }); ["tfKx", "tfKy"].forEach(id => { $(id).value = "1"; }); $("tfSx").checked = false; $("tfSy").checked = false; tfRowsSync(); refreshAll(); };
+})();
+
 /* ============ 作業の保存・読み込み(ファイル) ============ */
 const WORK_SKIP = new Set(["apiKey", "modelName", "penOnly", "workFile"]);
 function workCollect() {
@@ -3089,7 +3219,7 @@ function workApply(d) {
   drawFromInput();
   if (coefOn()) { coefBuildRows(); coefRowsSync(); coefApply(); }
   ["selL", "selR"].forEach(id => { const v = d.controls[id]; if (v !== undefined && [...$(id).options].some(o => o.value === String(v))) $(id).value = String(v); });
-  refreshAll();
+  tfRowsSync(); refreshAll();
 }
 async function workSave() {
   const d = new Date(), z = n => String(n).padStart(2, "0");
